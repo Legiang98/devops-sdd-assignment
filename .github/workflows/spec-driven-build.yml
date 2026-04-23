@@ -35,14 +35,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install dependencies
         run: |
-          python -m venv .venv
+          python3 -m venv .venv
           . .venv/bin/activate
           pip install -r requirements.txt
 
@@ -61,7 +56,7 @@ jobs:
             SPEC_FILE="applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
           fi
 
-          RELEASE_ID=$(python -c "import yaml, pathlib; s=yaml.safe_load(pathlib.Path('${SPEC_FILE}').read_text(encoding='utf-8')); print(s['change_id'])")
+          RELEASE_ID=$(python3 -c "import yaml, pathlib; s=yaml.safe_load(pathlib.Path('${SPEC_FILE}').read_text(encoding='utf-8')); print(s['change_id'])")
 
           echo "spec_file=$SPEC_FILE" >> "$GITHUB_OUTPUT"
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
