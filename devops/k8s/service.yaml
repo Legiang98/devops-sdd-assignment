@@ -1,2 +1,13 @@
-# Placeholder Kubernetes service manifest for PoC.
-# You will define actual Kubernetes resource content.
+apiVersion: v1
+kind: Service
+metadata:
+  name: expense-workflow
+  namespace: devops-ssd-assignment
+spec:
+  selector:
+    app: expense-workflow
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8000

@@ -27,6 +27,9 @@ on:
 jobs:
   pipeline:
     runs-on: [self-hosted, macOS]
+    permissions:
+      contents: write
+      pull-requests: write
     env:
       AGENT_CODEGEN_PROVIDER: ollama
       OLLAMA_MODEL: qwen2.5:7b
@@ -75,6 +78,75 @@ jobs:
         run: |
           . .venv/bin/activate
           python -m compileall applications/expense-workflow-service/src
+
+      - name: Build image and update GitOps image tag
+        id: image_meta
+        run: |
+          set -euo pipefail
+          IMAGE_REPOSITORY="expense-workflow"
+          IMAGE_TAG="${GITHUB_SHA::12}"
+
+          if ! command -v minikube >/dev/null 2>&1; then
+            echo "[build] minikube CLI not found on runner"
+            exit 1
+          fi
+
+          if ! minikube status >/dev/null 2>&1; then
+            echo "[build] minikube is not running"
+            exit 1
+          fi
+
+          echo "[build] building image directly in minikube"
+          minikube image build \
+            -f applications/expense-workflow-service/Dockerfile \
+            -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
+            .
+
+          ./devops/scripts/update_image_tag.sh "${IMAGE_REPOSITORY}" "${IMAGE_TAG}"
+
+          echo "image_repository=${IMAGE_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect generated artifacts changes
+        id: generated_changes
+        run: |
+          set -euo pipefail
+          if git status --porcelain -- applications/expense-workflow-service/src/generated devops/k8s/deployment.yaml devops/k8s/image-tag.yaml | grep -q .; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Auto-commit generated artifacts on dev
+        if: github.event_name == 'push' && github.ref_name == 'dev' && steps.generated_changes.outputs.has_changes == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add applications/expense-workflow-service/src/generated/
+          git add devops/k8s/deployment.yaml devops/k8s/image-tag.yaml
+          git commit -m "ci(spec): generate code for ${{ steps.resolve.outputs.release_id }} [skip ci]"
+          git push origin HEAD:dev
+
+      - name: Create PR with generated artifacts on main
+        if: github.event_name == 'push' && github.ref_name == 'main' && steps.generated_changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "ci(spec): generate code for ${{ steps.resolve.outputs.release_id }} [skip ci]"
+          title: "ci(spec): generated code for ${{ steps.resolve.outputs.release_id }}"
+          body: |
+            Auto-generated code update from spec-driven pipeline.
+
+            - Release ID: `${{ steps.resolve.outputs.release_id }}`
+            - Spec: `${{ steps.resolve.outputs.spec_file }}`
+            - Source: `${{ github.workflow }} #${{ github.run_number }}`
+          branch: "bot/spec-generate-${{ github.run_id }}"
+          base: main
+          add-paths: |
+            applications/expense-workflow-service/src/generated/**
+            devops/k8s/deployment.yaml
+            devops/k8s/image-tag.yaml
 
       - name: Upload evidence artifacts
         if: always()

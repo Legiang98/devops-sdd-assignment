@@ -1,2 +1,16 @@
-# Placeholder Kubernetes ingress manifest for PoC.
-# You will define actual Kubernetes resource content.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: expense-workflow
+  namespace: devops-ssd-assignment
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: expense-workflow
+                port:
+                  number: 80

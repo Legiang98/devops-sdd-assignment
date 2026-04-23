@@ -54,3 +54,29 @@ subprocess.CalledProcessError: Command '['/Users/lesip/Projects/side-project/dev
 [trigger-pipeline] step 1/2: agent generation
 [trigger-pipeline] codegen_provider=ollama
 Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=ollama
+Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL
+Generated code artifact: applications/expense-workflow-service/src/generated/spec_contract.py
+Codegen provider: ollama
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml
+[gate] release_dir=build/releases/EXP-FINANCE-APPROVAL
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=deterministic
+Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL
+Generated code artifact: applications/expense-workflow-service/src/generated/spec_contract.py
+Codegen provider: deterministic
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml
+[gate] release_dir=build/releases/EXP-FINANCE-APPROVAL
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed
