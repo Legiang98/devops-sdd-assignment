@@ -1,0 +1,13 @@
+Generate a Python module with ONLY these assignments and exact values:
+SCHEMA_VERSION={schema_version_json}
+CHANGE_ID={change_id_json}
+SERVICE={service_json}
+BASELINE_STAGES={baseline_stages_json}
+NEW_STAGE_NAME={new_stage_name_json}
+NEW_STAGE_THRESHOLD={new_stage_threshold_json}
+
+Constraints:
+- No markdown
+- No comments
+- No functions/classes
+- Only assignments for the listed constants

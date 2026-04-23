@@ -10,3 +10,7 @@ Codegen provider options:
   - `AGENT_CODEGEN_PROVIDER=ollama`
   - `OLLAMA_MODEL=qwen2.5:7b`
   - `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+
+Prompt files for Ollama codegen:
+- `prompts/codegen_system.txt`
+- `prompts/codegen_user_template.txt`

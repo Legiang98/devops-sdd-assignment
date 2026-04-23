@@ -12,6 +12,7 @@ import yaml
 SERVICE_SOURCE_ROOTS = {
     "expense-workflow": Path("applications/expense-workflow-service/src"),
 }
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
 def parse_args() -> argparse.Namespace:
@@ -98,22 +99,26 @@ def extract_constants(module_source: str) -> dict[str, object]:
     return constants
 
 
+def render_prompt(contract: dict[str, object]) -> str:
+    system_prompt = (PROMPTS_DIR / "codegen_system.txt").read_text(encoding="utf-8").strip()
+    user_template = (PROMPTS_DIR / "codegen_user_template.txt").read_text(encoding="utf-8")
+    user_prompt = user_template.format(
+        schema_version_json=json.dumps(contract["schema_version"]),
+        change_id_json=json.dumps(contract["change_id"]),
+        service_json=json.dumps(contract["service"]),
+        baseline_stages_json=json.dumps(contract["baseline_stage_names"]),
+        new_stage_name_json=json.dumps(contract["new_stage_name"]),
+        new_stage_threshold_json=json.dumps(contract["new_stage_threshold"]),
+    ).strip()
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
 def llm_codegen_with_ollama(
     contract: dict[str, object],
     model: str,
     base_url: str,
 ) -> str:
-    prompt = (
-        "Generate a Python module with ONLY these assignments and exact values. "
-        "No markdown, no extra text, no functions.\n"
-        f"SCHEMA_VERSION={json.dumps(contract['schema_version'])}\n"
-        f"CHANGE_ID={json.dumps(contract['change_id'])}\n"
-        f"SERVICE={json.dumps(contract['service'])}\n"
-        f"BASELINE_STAGES={json.dumps(contract['baseline_stage_names'])}\n"
-        f"NEW_STAGE_NAME={json.dumps(contract['new_stage_name'])}\n"
-        f"NEW_STAGE_THRESHOLD={json.dumps(contract['new_stage_threshold'])}\n"
-        "Required first line: \"\"\"Auto-generated from spec. Do not edit manually.\"\"\""
-    )
+    prompt = render_prompt(contract)
 
     payload = {
         "model": model,
