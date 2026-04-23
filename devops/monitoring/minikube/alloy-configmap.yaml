@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: monitoring
+data:
+  config.alloy: |
+    logging {
+      level  = "info"
+      format = "logfmt"
+    }
+
+    otelcol.receiver.otlp "ingest" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+
+      http {
+        endpoint = "0.0.0.0:4318"
+      }
+
+      output {
+        traces  = [otelcol.processor.batch.forward.input]
+        metrics = [otelcol.processor.batch.forward.input]
+        logs    = [otelcol.processor.batch.forward.input]
+      }
+    }
+
+    otelcol.processor.batch "forward" {
+      output {
+        traces  = [otelcol.exporter.otlp.to_otel.input]
+        metrics = [otelcol.exporter.otlp.to_otel.input]
+        logs    = [otelcol.exporter.otlp.to_otel.input]
+      }
+    }
+
+    otelcol.exporter.otlp "to_otel" {
+      client {
+        endpoint = "otel-collector.monitoring.svc.cluster.local:4317"
+
+        tls {
+          insecure = true
+        }
+      }
+    }

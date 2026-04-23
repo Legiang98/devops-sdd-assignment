@@ -38,6 +38,14 @@ docker compose up --build -d
 python devops/observability/verify_behavior.py --base-url http://localhost:8000
 ```
 
+### Optional: Minikube monitoring stack (OTel + Alloy + Tempo + Grafana)
+
+```bash
+./devops/scripts/setup_monitoring_minikube.sh
+```
+
+Guide: `devops/observability/monitoring-minikube.md`
+
 ### 5) Roll back to baseline
 
 ```bash

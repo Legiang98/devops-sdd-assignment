@@ -27,3 +27,7 @@ spec:
               value: /runtime/rules.json
             - name: RELEASE_ID_FILE
               value: /runtime/release_id.txt
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://alloy.monitoring.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: expense-workflow

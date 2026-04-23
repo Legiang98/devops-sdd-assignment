@@ -5,6 +5,12 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
@@ -24,6 +30,25 @@ approval_step_completed_total = Counter(
 expense_approved_total = Counter("expense_approved_total", "Fully approved expenses")
 
 EXPENSES: dict[str, dict[str, Any]] = {}
+
+
+def setup_tracing() -> None:
+    if os.getenv("OTEL_SDK_DISABLED", "false").lower() == "true":
+        return
+
+    endpoint = os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "http://otel-collector.monitoring.svc.cluster.local:4318",
+    ).rstrip("/")
+    service_name = os.getenv("OTEL_SERVICE_NAME", "expense-workflow-service")
+
+    resource = Resource.create({"service.name": service_name})
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"))
+    )
+    trace.set_tracer_provider(provider)
+    FastAPIInstrumentor.instrument_app(app)
 
 
 class SubmitExpenseRequest(BaseModel):
@@ -137,3 +162,6 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
 @app.get("/metrics")
 def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+setup_tracing()
