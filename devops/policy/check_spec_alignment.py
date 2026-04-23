@@ -26,6 +26,16 @@ def main() -> None:
 
     violations: list[str] = []
 
+    docs = spec.get("docs", {})
+    swagger = docs.get("swagger") if isinstance(docs, dict) else None
+    if not isinstance(swagger, dict):
+        violations.append("docs.swagger is required")
+    else:
+        swagger_path = swagger.get("path")
+        swagger_url = swagger.get("url")
+        if not swagger_path and not swagger_url:
+            violations.append("docs.swagger.path or docs.swagger.url is required")
+
     expected_change_id = spec["change_id"]
     if rules.get("release_id") != expected_change_id:
         violations.append("rules.release_id must match spec.change_id")

@@ -8,6 +8,7 @@ required_fields = [
   "service",
   "workflow_change",
   "deployment",
+  "docs",
   "quality",
 ]
 
@@ -39,6 +40,17 @@ deny[msg] {
 deny[msg] {
   not input.spec.quality.unit_tests
   msg := "quality.unit_tests is required"
+}
+
+deny[msg] {
+  not input.spec.docs.swagger
+  msg := "docs.swagger is required"
+}
+
+deny[msg] {
+  not input.spec.docs.swagger.path
+  not input.spec.docs.swagger.url
+  msg := "docs.swagger.path or docs.swagger.url is required"
 }
 
 deny[msg] {
