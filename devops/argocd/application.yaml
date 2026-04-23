@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devops-ssd-assignment
+  namespace: openshift-gitops
+spec:
+  destination:
+    namespace: devops-ssd-assignment
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    path: devops/k8s
+    repoURL: https://github.com/lesip/devops-ssd-assignment.git
+    targetRevision: HEAD
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

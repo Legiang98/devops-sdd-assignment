@@ -1,0 +1,24 @@
+schema_version: 1.0.0
+change_id: BASELINE
+service: expense-workflow
+summary: Baseline manager-only workflow
+owner: platform
+risk_tier: low
+
+workflow_change:
+  baseline_stages:
+    - name: manager
+      required_when:
+        amount_gte: 0
+
+api_contract:
+  endpoints:
+    - method: POST
+      path: /expenses
+    - method: POST
+      path: /expenses/{expense_id}/approve
+
+deployment:
+  environment: local
+  strategy: replace
+  rollback_target: BASELINE

@@ -1,0 +1,6 @@
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+Generated release artifacts: devops/releases/CHG-001
+[trigger-pipeline] step 2/2: policy gate
+Policy gate passed
+[trigger-pipeline] pipeline passed

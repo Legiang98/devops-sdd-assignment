@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    container_name: expense-workflow-app
+    ports:
+      - "8000:8000"
+    environment:
+      RULES_PATH: /runtime/rules.json
+      RELEASE_ID_FILE: /runtime/release_id.txt
+    volumes:
+      - ./deploy/current:/runtime:ro
