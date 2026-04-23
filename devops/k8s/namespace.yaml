@@ -1,2 +1,4 @@
-# Placeholder Kubernetes namespace manifest for PoC.
-# You will define actual Kubernetes resource content.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devops-ssd-assignment

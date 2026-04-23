@@ -4,3 +4,53 @@ Generated release artifacts: devops/releases/CHG-001
 [trigger-pipeline] step 2/2: policy gate
 Policy gate passed
 [trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL
+[trigger-pipeline] step 2/2: policy gate
+Policy gate passed
+[trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL
+Generated code artifact: applications/expense-workflow-service/src/generated/spec_contract.py
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml
+[gate] release_dir=build/releases/EXP-FINANCE-APPROVAL
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=deterministic
+Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL
+Generated code artifact: applications/expense-workflow-service/src/generated/spec_contract.py
+Codegen provider: deterministic
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml
+[gate] release_dir=build/releases/EXP-FINANCE-APPROVAL
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=ollama
+Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL
+Ollama request failed: <urlopen error [Errno 1] Operation not permitted>
+Traceback (most recent call last):
+  File "/Users/lesip/Projects/side-project/devops-ssd-assignment/devops/agent/generate.py", line 71, in <module>
+    main()
+    ~~~~^^
+  File "/Users/lesip/Projects/side-project/devops-ssd-assignment/devops/agent/generate.py", line 67, in main
+    subprocess.run(codegen_cmd, check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/Users/lesip/Projects/side-project/devops-ssd-assignment/.venv/bin/python', 'devops/agent/generate_code.py', '--spec', 'applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml', '--output-root', 'build/releases', '--provider', 'ollama', '--ollama-model', 'qwen2.5:7b', '--ollama-base-url', 'http://127.0.0.1:11434']' returned non-zero exit status 1.
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=ollama
+Generated release artifacts: build/releases/EXP-FINANCE-APPROVAL

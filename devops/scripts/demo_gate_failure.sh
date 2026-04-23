@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SPEC="$ROOT/applications/expense-workflow-service/specs/CHG-001-expense-finance-approval.yaml"
-RELEASE_DIR="$ROOT/build/releases/CHG-001"
+SPEC="$ROOT/applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
+RELEASE_DIR="$ROOT/build/releases/EXP-FINANCE-APPROVAL"
 
 echo "[1/4] Generating mismatched artifacts"
 python "$ROOT/devops/agent/run_agent.py" --spec "$SPEC" --simulate-mismatch

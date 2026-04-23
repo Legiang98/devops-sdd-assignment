@@ -8,16 +8,23 @@ mkdir -p logs
 LOG_FILE="logs/pipeline.log"
 
 main() {
-  SPEC="${1:-applications/expense-workflow-service/specs/CHG-001-expense-finance-approval.yaml}"
-  RELEASE_ID="${2:-CHG-001}"
-  RELEASE_DIR="build/releases/${RELEASE_ID}"
+  SPEC="${1:-applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml}"
+  RELEASE_ID="${2:-EXP-FINANCE-APPROVAL}"
+  CODEGEN_PROVIDER="${3:-deterministic}"
+  OLLAMA_MODEL="${4:-qwen2.5:7b}"
+  OLLAMA_BASE_URL="${5:-http://127.0.0.1:11434}"
 
   echo "[trigger-pipeline] start"
   echo "[trigger-pipeline] step 1/2: agent generation"
-  python devops/agent/generate.py --spec "$SPEC"
+  echo "[trigger-pipeline] codegen_provider=$CODEGEN_PROVIDER"
+  python devops/agent/generate.py \
+    --spec "$SPEC" \
+    --codegen-provider "$CODEGEN_PROVIDER" \
+    --ollama-model "$OLLAMA_MODEL" \
+    --ollama-base-url "$OLLAMA_BASE_URL"
 
   echo "[trigger-pipeline] step 2/2: policy gate"
-  python devops/policy/check_spec_alignment.py --spec "$SPEC" --release-dir "$RELEASE_DIR"
+  ./scripts/gate.sh "$SPEC" "$RELEASE_ID"
 
   echo "[trigger-pipeline] pipeline passed"
 }

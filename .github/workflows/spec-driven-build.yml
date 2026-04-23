@@ -1,0 +1,92 @@
+name: Spec Driven Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      spec_file:
+        description: "Spec file path"
+        required: false
+        default: "applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
+  push:
+    paths:
+      - "applications/**/specs/*.yaml"
+      - "devops/agent/**"
+      - "devops/policy/**"
+      - "devops/scripts/**"
+      - "scripts/**"
+      - ".github/workflows/spec-driven-build.yml"
+  pull_request:
+    paths:
+      - "applications/**/specs/*.yaml"
+      - "devops/agent/**"
+      - "devops/policy/**"
+      - "devops/scripts/**"
+      - "scripts/**"
+      - ".github/workflows/spec-driven-build.yml"
+
+jobs:
+  pipeline:
+    runs-on: [self-hosted, macOS]
+    env:
+      AGENT_CODEGEN_PROVIDER: ollama
+      OLLAMA_MODEL: qwen2.5:7b
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Check Ollama endpoint
+        if: env.AGENT_CODEGEN_PROVIDER == 'ollama'
+        run: |
+          curl -sf "${OLLAMA_BASE_URL}/api/tags" >/dev/null
+
+      - name: Resolve spec and release id
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          SPEC_FILE="${{ github.event.inputs.spec_file }}"
+          if [ -z "${SPEC_FILE}" ]; then
+            SPEC_FILE="applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
+          fi
+
+          RELEASE_ID=$(python -c "import yaml, pathlib; s=yaml.safe_load(pathlib.Path('${SPEC_FILE}').read_text(encoding='utf-8')); print(s['change_id'])")
+
+          echo "spec_file=$SPEC_FILE" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Run spec pipeline (generate + gate)
+        run: |
+          . .venv/bin/activate
+          ./devops/scripts/trigger-pipeline.sh \
+            "${{ steps.resolve.outputs.spec_file }}" \
+            "${{ steps.resolve.outputs.release_id }}" \
+            "${AGENT_CODEGEN_PROVIDER}" \
+            "${OLLAMA_MODEL}" \
+            "${OLLAMA_BASE_URL}"
+
+      - name: Build app (syntax/build smoke check)
+        run: |
+          . .venv/bin/activate
+          python -m compileall applications/expense-workflow-service/src
+
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-driven-evidence-${{ github.run_id }}
+          path: |
+            logs/pipeline.log
+            build/releases/${{ steps.resolve.outputs.release_id }}/evidence/
+            applications/expense-workflow-service/src/generated/spec_contract.py

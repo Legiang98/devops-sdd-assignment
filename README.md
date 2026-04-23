@@ -28,7 +28,7 @@ pip install -r requirements.txt
 ### 3) Deploy corrected release and run service
 
 ```bash
-./devops/scripts/deploy_release.sh CHG-001
+./devops/scripts/deploy_release.sh EXP-FINANCE-APPROVAL
 docker compose up --build -d
 ```
 

@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+devops/argocd/repo-secret.yaml
+build/
+.github/actions-runner/

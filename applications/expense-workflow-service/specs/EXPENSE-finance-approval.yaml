@@ -1,5 +1,5 @@
 schema_version: 1.0.0
-change_id: CHG-001
+change_id: EXP-FINANCE-APPROVAL
 service: expense-workflow
 summary: Add finance approval stage for expenses >= 1000
 owner: finance-ops
