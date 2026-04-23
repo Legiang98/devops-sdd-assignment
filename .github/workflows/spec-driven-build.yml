@@ -74,6 +74,12 @@ jobs:
             "${OLLAMA_MODEL:-qwen2.5:7b}" \
             "${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 
+      - name: Enforce non-deterministic codegen in CI
+        run: |
+          set -euo pipefail
+          REPORT="build/releases/${{ steps.resolve.outputs.release_id }}/evidence/codegen-report.json"
+          python3 -c "import json, pathlib; r=json.loads(pathlib.Path('${REPORT}').read_text(encoding='utf-8')); p=r.get('provider'); assert p=='ollama', f'Expected provider=ollama, got provider={p!r}'; print(f'Verified codegen provider: {p}')"
+
       - name: Build app (syntax/build smoke check)
         run: |
           . .venv/bin/activate

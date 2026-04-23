@@ -8,6 +8,7 @@ required_fields = [
   "service",
   "workflow_change",
   "deployment",
+  "quality",
 ]
 
 missing[field] {
@@ -33,6 +34,26 @@ deny[msg] {
 deny[msg] {
   count(input.spec.workflow_change.baseline_stages) == 0
   msg := "workflow_change.baseline_stages must not be empty"
+}
+
+deny[msg] {
+  not input.spec.quality.unit_tests
+  msg := "quality.unit_tests is required"
+}
+
+deny[msg] {
+  input.spec.quality.unit_tests.required != true
+  msg := "quality.unit_tests.required must be true"
+}
+
+deny[msg] {
+  not input.spec.quality.unit_tests.min_new_tests
+  msg := "quality.unit_tests.min_new_tests is required"
+}
+
+deny[msg] {
+  input.spec.quality.unit_tests.min_new_tests < 1
+  msg := "quality.unit_tests.min_new_tests must be >= 1"
 }
 
 allow {

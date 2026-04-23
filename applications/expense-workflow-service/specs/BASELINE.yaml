@@ -22,3 +22,10 @@ deployment:
   environment: local
   strategy: replace
   rollback_target: BASELINE
+
+quality:
+  unit_tests:
+    required: true
+    min_new_tests: 1
+    focus_areas:
+      - expense_submission

@@ -33,6 +33,14 @@ deployment:
   strategy: replace
   rollback_target: BASELINE
 
+quality:
+  unit_tests:
+    required: true
+    min_new_tests: 2
+    focus_areas:
+      - expense_submission
+      - approval_thresholds
+
 observability_assertions:
   - metric: approval_step_required_total
     labels:
