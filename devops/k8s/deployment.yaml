@@ -1,2 +1,29 @@
-# Placeholder Kubernetes deployment manifest for PoC.
-# You will define actual Kubernetes resource content.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: expense-workflow
+  namespace: devops-ssd-assignment
+  labels:
+    app: expense-workflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: expense-workflow
+  template:
+    metadata:
+      labels:
+        app: expense-workflow
+    spec:
+      containers:
+        - name: app
+          image: expense-workflow:bootstrap
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: RULES_PATH
+              value: /runtime/rules.json
+            - name: RELEASE_ID_FILE
+              value: /runtime/release_id.txt

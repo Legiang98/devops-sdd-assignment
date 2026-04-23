@@ -1,0 +1,4 @@
+# Auto-updated by CI pipeline.
+image:
+  repository: expense-workflow
+  tag: bootstrap
