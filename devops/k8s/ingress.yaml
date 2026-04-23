@@ -1,16 +1,4 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: expense-workflow
-  namespace: devops-ssd-assignment
-spec:
-  rules:
-    - http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: expense-workflow
-                port:
-                  number: 80
+# Ingress intentionally disabled for localhost-only Minikube demo.
+# Access the service via:
+# - minikube service expense-workflow -n devops-ssd-assignment --url
+# - kubectl port-forward svc/expense-workflow 8080:80 -n devops-ssd-assignment

@@ -1,12 +1,12 @@
 schema_version: 1.0.0
-change_id: EXP-FINANCE-APPROVAL
+change_id: EXP-REJECTION-REASON-REQUIRED
 service: expense-workflow
-summary: Add finance approval stage for expenses >= 1000
+summary: Require rejection reason code and comment for expense rejection
 owner: finance-ops
 risk_tier: medium
 
 intent:
-  business_outcome: Prevent high-value expenses from bypassing finance review.
+  business_outcome: Ensure every rejection decision is auditable and explainable.
   non_goals:
     - No infrastructure migration
     - No schema change
@@ -27,6 +27,8 @@ api_contract:
       path: /expenses
     - method: POST
       path: /expenses/{expense_id}/approve
+    - method: POST
+      path: /expenses/{expense_id}/reject
 
 deployment:
   environment: local
@@ -50,13 +52,11 @@ quality:
     required: true
     min_new_tests: 2
     focus_areas:
-      - expense_submission
-      - approval_thresholds
+      - rejection_validation
+      - rejection_audit_fields
 
 observability_assertions:
-  - metric: approval_step_required_total
-    labels:
-      step: finance
-    expected_behavior: increment only for expenses >= 1000
-  - metric: expense_approved_total
-    expected_behavior: increment when all required stages complete
+  - metric: expense_rejected_total
+    expected_behavior: increment when rejection is accepted with required reason fields
+  - metric: rejection_missing_reason_total
+    expected_behavior: increment when reject request misses reason_code/comment

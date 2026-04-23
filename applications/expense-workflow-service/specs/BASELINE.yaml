@@ -22,6 +22,18 @@ deployment:
   environment: local
   strategy: replace
   rollback_target: BASELINE
+  k8s:
+    namespace: devops-ssd-assignment
+    deployment:
+      name: expense-workflow
+      replicas: 1
+      container_port: 8000
+    service:
+      name: expense-workflow
+      port: 80
+      target_port: 8000
+    ingress:
+      enabled: false
 
 quality:
   unit_tests:
