@@ -96,6 +96,8 @@ def main() -> None:
     workspace = spec.get("workspace", {})
     app_root = Path(workspace.get("path", spec_path.resolve().parents[1])).resolve()
     manifest_root = Path(workspace.get("manifest_path", f"devops/k8s/{app_root.name}")).resolve()
+    dockerfile_path = app_root / workspace.get("dockerfile_path", "Dockerfile")
+    tests_root = app_root / workspace.get("tests_path", "tests")
 
     module_path = Path(codegen_report["module_path"])
     module_constants = extract_constants(module_path)
@@ -139,7 +141,13 @@ def main() -> None:
 
     expected_generated = {
         app_root / "src" / "generated" / "spec_contract.py",
+        app_root / "src" / "__init__.py",
         app_root / "src" / "main.py",
+        app_root / "README.md",
+        app_root / "src" / "README.md",
+        dockerfile_path,
+        tests_root / "README.md",
+        tests_root / "test_generated_placeholder.py",
         manifest_root / "namespace.yaml",
         manifest_root / "deployment.yaml",
         manifest_root / "service.yaml",
@@ -179,6 +187,12 @@ def main() -> None:
         )
         if has_reject != reject_expected:
             violations.append("generated app reject route does not match spec")
+
+    if not dockerfile_path.exists():
+        violations.append(f"generated Dockerfile missing: {dockerfile_path}")
+
+    if not tests_root.exists():
+        violations.append(f"generated tests directory missing: {tests_root}")
 
     namespace_path = manifest_root / "namespace.yaml"
     deployment_path = manifest_root / "deployment.yaml"

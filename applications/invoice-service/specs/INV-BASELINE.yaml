@@ -1,0 +1,54 @@
+schema_version: 1.0.0
+change_id: INV-BASELINE
+service: invoice-service
+summary: Baseline invoice backend
+owner: platform
+risk_tier: low
+
+workflow_change:
+  baseline_stages:
+    - name: system
+      required_when:
+        amount_gte: 0
+
+workspace:
+  path: applications/invoice-service
+  src_path: src
+  tests_path: tests
+  dockerfile_path: Dockerfile
+  manifest_path: devops/k8s/invoice-service
+
+api_contract:
+  endpoints:
+    - method: POST
+      path: /invoices
+    - method: GET
+      path: /invoices/{invoice_id}
+
+docs:
+  swagger:
+    path: /openapi.json
+
+deployment:
+  environment: local
+  strategy: replace
+  rollback_target: INV-BASELINE
+  k8s:
+    namespace: devops-ssd-assignment
+    deployment:
+      name: invoice-service
+      replicas: 1
+      container_port: 8000
+    service:
+      name: invoice-service
+      port: 80
+      target_port: 8000
+    ingress:
+      enabled: true
+
+quality:
+  unit_tests:
+    required: true
+    min_new_tests: 1
+    focus_areas:
+      - invoice_creation

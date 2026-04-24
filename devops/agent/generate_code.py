@@ -4,6 +4,7 @@
 import argparse
 import ast
 import json
+import re
 from pathlib import Path
 from urllib import error, request
 
@@ -347,6 +348,138 @@ def metrics() -> Response:
 
 setup_tracing()
 '''
+
+
+def generic_app_module_body(contract: dict[str, object], app_title: str) -> str:
+    endpoint_defs: list[str] = []
+    for index, endpoint in enumerate(contract["api_endpoints"]):
+        method, path = endpoint.split(" ", 1)
+        method_lower = method.lower()
+        fn_name = f"endpoint_{index}"
+        if "{" in path:
+            fn_name = f"{fn_name}_path"
+        path_params = re.findall(r"{([^}]+)}", path)
+        path_args = ", ".join(f"{param}: str" for param in path_params)
+        path_payload = ", ".join(f'"{param}": {param}' for param in path_params)
+        if path_payload:
+            path_payload = f", \"path_params\": {{{path_payload}}}"
+        if method == "GET":
+            body = f"""
+@app.get("{path}")
+def {fn_name}({path_args}) -> dict[str, object]:
+    return {{
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "method": "{method}",
+        "path": "{path}",
+        "message": "Generated endpoint placeholder"{path_payload},
+    }}
+"""
+        else:
+            args = path_args
+            if args:
+                args = f"{args}, payload: dict[str, object] | None = None"
+            else:
+                args = "payload: dict[str, object] | None = None"
+            body = f"""
+@app.{method_lower}("{path}")
+def {fn_name}({args}) -> dict[str, object]:
+    return {{
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "method": "{method}",
+        "path": "{path}",
+        "payload": payload or {{}},
+        "message": "Generated endpoint placeholder"{path_payload},
+    }}
+"""
+        endpoint_defs.append(body.strip("\n"))
+
+    endpoint_block = "\n\n".join(endpoint_defs)
+    return f'''"""Auto-generated service module from spec. Do not edit manually."""
+
+from fastapi import FastAPI
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+
+from src.generated.spec_contract import (
+    API_ENDPOINTS,
+    BASELINE_STAGES,
+    CHANGE_ID,
+    NEW_STAGE_NAME,
+    NEW_STAGE_THRESHOLD,
+    REJECT_ENDPOINT_ENABLED,
+    SCHEMA_VERSION,
+    SERVICE,
+)
+
+app = FastAPI(title="{app_title}")
+
+request_total = Counter("generated_request_total", "Generated placeholder requests", ["method", "path"])
+
+
+@app.get("/health")
+def health() -> dict[str, object]:
+    return {{
+        "status": "ok",
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "schema_version": SCHEMA_VERSION,
+        "baseline_stages": BASELINE_STAGES,
+        "new_stage_name": NEW_STAGE_NAME,
+        "new_stage_threshold": NEW_STAGE_THRESHOLD,
+        "reject_endpoint_enabled": REJECT_ENDPOINT_ENABLED,
+        "api_endpoints": API_ENDPOINTS,
+    }}
+
+
+{endpoint_block}
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+'''
+
+
+def dockerfile_body(app_dir_name: str) -> str:
+    return (
+        "FROM python:3.12-slim\n\n"
+        "WORKDIR /app\n\n"
+        "COPY requirements.txt /app/requirements.txt\n"
+        "RUN pip install --no-cache-dir -r /app/requirements.txt\n\n"
+        f"COPY applications/{app_dir_name}/src /app/src\n\n"
+        'CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]\n'
+    )
+
+
+def service_readme_body(app_dir_name: str) -> str:
+    title = app_dir_name.replace("-", " ").title()
+    return (
+        f"# {title}\n\n"
+        "Business application slice generated from spec.\n\n"
+        "- `specs/`: versioned change specifications\n"
+        "- `src/`: service implementation\n"
+        "- `tests/`: service tests\n"
+    )
+
+
+def src_readme_body() -> str:
+    return "# Service Source\n\nRuntime service code for the generated application.\n"
+
+
+def tests_readme_body() -> str:
+    return "# Tests Placeholder\n\nAdd service-level tests for behavior described in specs.\n"
+
+
+def tests_module_body(app_dir_name: str) -> str:
+    return (
+        f'"""Placeholder tests for {app_dir_name}.\n\n'
+        "Replace with behavior tests that validate spec-driven output.\n"
+        '"""\n\n\n'
+        "def test_placeholder() -> None:\n"
+        "    assert True\n"
+    )
 
 
 def namespace_manifest_from_spec(spec: dict) -> str:
@@ -783,12 +916,17 @@ def main() -> None:
     if not app_root.is_dir():
         raise SystemExit(f"Could not resolve application root for spec: {spec_path}")
     gitops_root = Path("devops/k8s") / app_dir_name
-    if not gitops_root.is_dir():
-        raise SystemExit(f"Could not resolve GitOps root for app: {gitops_root}")
     generated_dir = source_root / "generated"
     contract_path = generated_dir / "spec_contract.py"
     init_path = generated_dir / "__init__.py"
+    source_init_path = source_root / "__init__.py"
     app_main_path = source_root / "main.py"
+    app_readme_path = app_root / "README.md"
+    src_readme_path = source_root / "README.md"
+    tests_root = app_root / "tests"
+    tests_readme_path = tests_root / "README.md"
+    tests_module_path = tests_root / "test_generated_placeholder.py"
+    dockerfile_path = app_root / "Dockerfile"
     namespace_path = gitops_root / "namespace.yaml"
     deployment_path = gitops_root / "deployment.yaml"
     service_path = gitops_root / "service.yaml"
@@ -843,7 +981,10 @@ def main() -> None:
             app_codegen_provider = "ollama"
     else:
         contract_source = module_body_from_contract(contract)
-        app_source = app_module_body_from_contract(contract)
+        if service == "expense-workflow":
+            app_source = app_module_body_from_contract(contract)
+        else:
+            app_source = generic_app_module_body(contract, service.replace("-", " ").title())
         namespace_source = namespace_manifest_from_spec(spec)
         deployment_source = deployment_manifest_from_spec(spec, app_dir_name)
         service_source = service_manifest_from_spec(spec)
@@ -851,10 +992,18 @@ def main() -> None:
         app_codegen_provider = "deterministic-template"
 
     generated_dir.mkdir(parents=True, exist_ok=True)
+    tests_root.mkdir(parents=True, exist_ok=True)
     gitops_root.mkdir(parents=True, exist_ok=True)
+    source_root.mkdir(parents=True, exist_ok=True)
+    source_init_path.write_text("", encoding="utf-8")
     init_path.write_text("", encoding="utf-8")
     contract_path.write_text(contract_source, encoding="utf-8")
     app_main_path.write_text(app_source, encoding="utf-8")
+    dockerfile_path.write_text(dockerfile_body(app_dir_name), encoding="utf-8")
+    app_readme_path.write_text(service_readme_body(app_dir_name), encoding="utf-8")
+    src_readme_path.write_text(src_readme_body(), encoding="utf-8")
+    tests_readme_path.write_text(tests_readme_body(), encoding="utf-8")
+    tests_module_path.write_text(tests_module_body(app_dir_name), encoding="utf-8")
     namespace_path.write_text(namespace_source, encoding="utf-8")
     deployment_path.write_text(deployment_source, encoding="utf-8")
     service_path.write_text(service_source, encoding="utf-8")
@@ -888,7 +1037,13 @@ def main() -> None:
         ),
         "generated_files": [
             str(contract_path.resolve()),
+            str(source_init_path.resolve()),
             str(app_main_path.resolve()),
+            str(dockerfile_path.resolve()),
+            str(app_readme_path.resolve()),
+            str(src_readme_path.resolve()),
+            str(tests_readme_path.resolve()),
+            str(tests_module_path.resolve()),
             str(namespace_path.resolve()),
             str(deployment_path.resolve()),
             str(service_path.resolve()),

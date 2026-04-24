@@ -28,6 +28,7 @@ jobs:
   resolve:
     runs-on: [self-hosted, macOS]
     outputs:
+      should_run: ${{ steps.resolve.outputs.should_run }}
       spec_file: ${{ steps.resolve.outputs.spec_file }}
       release_id: ${{ steps.resolve.outputs.release_id }}
       app_dir: ${{ steps.resolve.outputs.app_dir }}
@@ -47,6 +48,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "should_run=false" >> "$GITHUB_OUTPUT"
+
           SPEC_FILE="${{ github.event.inputs.spec_file }}"
           if [ -z "${SPEC_FILE}" ]; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -62,8 +65,8 @@ jobs:
             CHANGED_COUNT=$(printf '%s\n' "${CHANGED_SPECS}" | sed '/^$/d' | wc -l | tr -d ' ')
 
             if [ "${CHANGED_COUNT}" -eq 0 ]; then
-              echo "No changed spec file detected"
-              exit 1
+              echo "No changed spec file detected, skipping pipeline"
+              exit 0
             fi
 
             if [ "${CHANGED_COUNT}" -ne 1 ]; then
@@ -82,21 +85,12 @@ jobs:
           MANIFEST_DIR="devops/k8s/${APP_DIR}"
           RELEASE_ID=$(python3 -c "import yaml, pathlib; s=yaml.safe_load(pathlib.Path('${SPEC_FILE}').read_text(encoding='utf-8')); print(s['change_id'])")
 
-          if [ ! -d "${APP_PATH}" ]; then
-            echo "Application path not found: ${APP_PATH}"
+          if [ ! -f "${SPEC_FILE}" ]; then
+            echo "Spec file not found: ${SPEC_FILE}"
             exit 1
           fi
 
-          if [ ! -d "${MANIFEST_DIR}" ]; then
-            echo "GitOps manifest path not found: ${MANIFEST_DIR}"
-            exit 1
-          fi
-
-          if [ ! -f "${APP_DOCKERFILE}" ]; then
-            echo "Dockerfile not found: ${APP_DOCKERFILE}"
-            exit 1
-          fi
-
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
           echo "spec_file=$SPEC_FILE" >> "$GITHUB_OUTPUT"
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
           echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
@@ -110,6 +104,11 @@ jobs:
           {
             echo "## Resolve"
             echo ""
+            echo "- Should run: \`${{ steps.resolve.outputs.should_run }}\`"
+            if [ "${{ steps.resolve.outputs.should_run }}" != "true" ]; then
+              echo "- No matching spec change detected; downstream jobs will be skipped."
+              exit 0
+            fi
             echo "- Spec: \`${{ steps.resolve.outputs.spec_file }}\`"
             echo "- Release: \`${{ steps.resolve.outputs.release_id }}\`"
             echo "- Application: \`${{ steps.resolve.outputs.app_path }}\`"
@@ -119,6 +118,7 @@ jobs:
   generate_and_gate:
     runs-on: [self-hosted, macOS]
     needs: resolve
+    if: needs.resolve.outputs.should_run == 'true'
     env:
       AGENT_CODEGEN_PROVIDER: ollama
       OLLAMA_MODEL: qwen2.5:7b
@@ -191,6 +191,7 @@ jobs:
   build_and_gitops:
     runs-on: [self-hosted, macOS]
     needs: [resolve, generate_and_gate]
+    if: needs.resolve.outputs.should_run == 'true'
     outputs:
       image_repository: ${{ steps.image_meta.outputs.image_repository }}
       image_tag: ${{ steps.image_meta.outputs.image_tag }}
@@ -272,6 +273,7 @@ jobs:
   publish:
     runs-on: [self-hosted, macOS]
     needs: [resolve, build_and_gitops]
+    if: needs.resolve.outputs.should_run == 'true'
     permissions:
       contents: write
       pull-requests: write
