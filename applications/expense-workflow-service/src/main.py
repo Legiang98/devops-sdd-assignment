@@ -216,17 +216,19 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
 
 
 
-@app.get("/expenses/{expense_id}/status")
-def get_expense_status(expense_id: str) -> dict[str, Any]:
+
+
+@app.get("/expenses/{expense_id}/summary")
+def get_expense_summary(expense_id: str) -> dict[str, Any]:
     expense = EXPENSES.get(expense_id)
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
 
     return {
         "id": expense["id"],
+        "amount": expense["amount"],
+        "description": expense["description"],
         "status": expense["status"],
-        "required_stages": expense["required_stages"],
-        "approved_stages": expense["approved_stages"],
     }
 
 

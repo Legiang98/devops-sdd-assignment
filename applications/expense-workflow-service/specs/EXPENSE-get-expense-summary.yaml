@@ -1,0 +1,30 @@
+schema_version: 1.0.0
+change_id: EXP-GET-EXPENSE-SUMMARY
+service: expense-workflow
+summary: Add endpoint to fetch a simple summary for an expense
+owner: finance-ops
+risk_tier: low
+
+intent:
+  business_outcome: Let clients retrieve a compact summary of an expense without downloading the full record.
+  non_goals:
+    - No infrastructure migration
+    - No schema change
+    - No workflow stage change
+
+api_contract:
+  endpoints:
+    - method: GET
+      path: /expenses/{expense_id}/summary
+
+quality:
+  unit_tests:
+    required: true
+    min_new_tests: 1
+    focus_areas:
+      - expense_summary_lookup
+      - expense_summary_not_found
+
+observability_assertions:
+  - metric: expense_submitted_total
+    expected_behavior: unchanged by expense summary requests
