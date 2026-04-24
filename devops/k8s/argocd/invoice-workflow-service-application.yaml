@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: devops-ssd-assignment
+  name: invoice-workflow-service
   namespace: argocd
 spec:
   destination:
@@ -9,7 +9,7 @@ spec:
     server: https://kubernetes.default.svc
   project: default
   source:
-    path: devops/k8s/expense-workflow
+    path: devops/k8s/invoice-workflow-service
     repoURL: git@github.com:Legiang98/devops-sdd-assignment.git
     targetRevision: HEAD
   syncPolicy:

@@ -4,11 +4,12 @@ metadata:
   name: grafana-datasources
   namespace: monitoring
 data:
-  tempo-datasource.yaml: |
+  datasources.yaml: |
     apiVersion: 1
     datasources:
       - name: Tempo
         type: tempo
+        uid: tempo
         access: proxy
         url: http://tempo.monitoring.svc.cluster.local:3200
         isDefault: true

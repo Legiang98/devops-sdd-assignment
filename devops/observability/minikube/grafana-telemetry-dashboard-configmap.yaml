@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-telemetry-dashboard
+  namespace: monitoring
+data:
+  telemetry-overview.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [
+        {
+          "icon": "external link",
+          "includeVars": false,
+          "keepTime": true,
+          "targetBlank": false,
+          "title": "All Expense Workflow Traces",
+          "type": "link",
+          "url": "/explore?schemaVersion=1&panes=%7B%22expense-all%22:%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22%7Bresource.service.name%3D%5C%22expense-workflow%5C%22%7D%22,%22queryType%22:%22traceqlSearch%22,%22refId%22:%22A%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D%7D&orgId=1"
+        },
+        {
+          "icon": "external link",
+          "includeVars": false,
+          "keepTime": true,
+          "targetBlank": false,
+          "title": "Submit Expense Spans",
+          "type": "link",
+          "url": "/explore?schemaVersion=1&panes=%7B%22expense-submit%22:%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22%7Bresource.service.name%3D%5C%22expense-workflow%5C%22%20%26%26%20name%3D%5C%22workflow.submit_expense%5C%22%7D%22,%22queryType%22:%22traceqlSearch%22,%22refId%22:%22A%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D%7D&orgId=1"
+        },
+        {
+          "icon": "external link",
+          "includeVars": false,
+          "keepTime": true,
+          "targetBlank": false,
+          "title": "Approve Expense Spans",
+          "type": "link",
+          "url": "/explore?schemaVersion=1&panes=%7B%22expense-approve%22:%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22%7Bresource.service.name%3D%5C%22expense-workflow%5C%22%20%26%26%20name%3D%5C%22workflow.approve_expense%5C%22%7D%22,%22queryType%22:%22traceqlSearch%22,%22refId%22:%22A%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D%7D&orgId=1"
+        },
+        {
+          "icon": "external link",
+          "includeVars": false,
+          "keepTime": true,
+          "targetBlank": false,
+          "title": "Approval Errors",
+          "type": "link",
+          "url": "/explore?schemaVersion=1&panes=%7B%22expense-errors%22:%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22%7Bresource.service.name%3D%5C%22expense-workflow%5C%22%20%26%26%20status%3Derror%7D%22,%22queryType%22:%22traceqlSearch%22,%22refId%22:%22A%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D%7D&orgId=1"
+        }
+      ],
+      "panels": [
+        {
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "code": {
+              "language": "markdown",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "# Workflow Trace Overview\n\nThis dashboard is Tempo-only and is designed for OTLP span work.\n\nTracked business spans in `expense-workflow`:\n- `workflow.submit_expense`\n- `workflow.load_rules`\n- `workflow.evaluate_required_stages`\n- `workflow.record_required_approvals`\n- `workflow.approve_expense`\n- `workflow.complete_approval_step`\n- `workflow.audit_event`\n\nUse the dashboard links above to jump directly into Tempo Explore.",
+            "mode": "markdown"
+          },
+          "pluginVersion": "10.4.5",
+          "title": "Overview",
+          "type": "text"
+        },
+        {
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "code": {
+              "language": "markdown",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "## Useful Span Attributes\n\nThe app now emits business attributes on spans:\n- `app.change_id`\n- `app.service`\n- `app.release_id`\n- `workflow.operation`\n- `workflow.required_stages`\n- `workflow.completed_stages`\n- `workflow.stage_count`\n- `approval.role`\n- `expense.id`\n- `expense.amount`\n- `expense.status`\n- `app.audit.event`\n\nThese are the main filters to use in TraceQL.",
+            "mode": "markdown"
+          },
+          "pluginVersion": "10.4.5",
+          "title": "Span Attributes",
+          "type": "text"
+        },
+        {
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "id": 3,
+          "options": {
+            "code": {
+              "language": "markdown",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "## TraceQL Queries\n\nAll traces for the service:\n```traceql\n{ resource.service.name = \"expense-workflow\" }\n```\n\nSubmit flow only:\n```traceql\n{ resource.service.name = \"expense-workflow\" && name = \"workflow.submit_expense\" }\n```\n\nApproval flow only:\n```traceql\n{ resource.service.name = \"expense-workflow\" && name = \"workflow.approve_expense\" }\n```\n\nApproval errors:\n```traceql\n{ resource.service.name = \"expense-workflow\" && status = error }\n```\n\nAudit spans only:\n```traceql\n{ resource.service.name = \"expense-workflow\" && name = \"workflow.audit_event\" }\n```",
+            "mode": "markdown"
+          },
+          "pluginVersion": "10.4.5",
+          "title": "Queries",
+          "type": "text"
+        },
+        {
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "id": 4,
+          "options": {
+            "code": {
+              "language": "markdown",
+              "showLineNumbers": false,
+              "showMiniMap": false
+            },
+            "content": "## Filter Examples\n\nSearch by expense id:\n```traceql\n{ resource.service.name = \"expense-workflow\" && span.expense.id = \"<expense-id>\" }\n```\n\nSearch finance-stage approvals:\n```traceql\n{ resource.service.name = \"expense-workflow\" && span.workflow.required_stages = \"finance\" }\n```\n\nSearch by change id:\n```traceql\n{ resource.service.name = \"expense-workflow\" && span.app.change_id = \"EXPENSE-finance-approval\" }\n```\n\nSearch approved terminal state:\n```traceql\n{ resource.service.name = \"expense-workflow\" && span.expense.status = \"APPROVED\" }\n```",
+            "mode": "markdown"
+          },
+          "pluginVersion": "10.4.5",
+          "title": "Filters",
+          "type": "text"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": [
+        "telemetry",
+        "tempo",
+        "otlp",
+        "workflow"
+      ],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Workflow Telemetry Overview",
+      "uid": "workflow-telemetry-overview",
+      "version": 2,
+      "weekStart": ""
+    }

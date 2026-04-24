@@ -5,6 +5,7 @@ import argparse
 import ast
 import json
 import re
+import subprocess
 from pathlib import Path
 from urllib import error, request
 
@@ -555,7 +556,7 @@ def service_manifest_from_spec(spec: dict) -> str:
 
 
 def ingress_host_for_app(app_dir_name: str) -> str:
-    return f"{app_dir_name}.localhost"
+    return f"{app_dir_name}.192.168.49.2.nip.io"
 
 
 def ingress_manifest_from_spec(spec: dict, app_dir_name: str) -> str:
@@ -592,6 +593,69 @@ def ingress_manifest_from_spec(spec: dict, app_dir_name: str) -> str:
         "                port:\n"
         f"                  number: {service['port']}\n"
     )
+
+
+def argocd_config_from_spec(spec: dict, app_dir_name: str) -> dict[str, object]:
+    argocd = ((spec.get("gitops") or {}).get("argocd") or {})
+    return {
+        "enabled": argocd.get("enabled", True),
+        "application_name": argocd.get("application_name", app_dir_name),
+        "project": argocd.get("project", "default"),
+    }
+
+
+def repo_url_for_argocd() -> str:
+    repo_secret_path = Path("devops/k8s/argocd/repo-secret.yaml")
+    if repo_secret_path.exists():
+        repo_secret = yaml.safe_load(repo_secret_path.read_text(encoding="utf-8")) or {}
+        secret_url = ((repo_secret.get("stringData") or {}).get("url") or "").strip()
+        if secret_url:
+            return secret_url
+
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return ""
+
+    return result.stdout.strip()
+
+
+def argocd_application_manifest_from_spec(
+    spec: dict,
+    app_dir_name: str,
+    manifest_path: str,
+) -> str:
+    config = argocd_config_from_spec(spec, app_dir_name)
+    repo_url = repo_url_for_argocd()
+    manifest_path_str = manifest_path.replace("\\", "/")
+    lines = [
+        "apiVersion: argoproj.io/v1alpha1",
+        "kind: Application",
+        "metadata:",
+        f"  name: {config['application_name']}",
+        "  namespace: argocd",
+        "spec:",
+        "  destination:",
+        f"    namespace: {spec['deployment']['k8s']['namespace']}",
+        "    server: https://kubernetes.default.svc",
+        f"  project: {config['project']}",
+        "  source:",
+        f"    path: {manifest_path_str}",
+        f"    repoURL: {repo_url}",
+        "    targetRevision: HEAD",
+        "  syncPolicy:",
+        "    automated:",
+        "      prune: true",
+        "      selfHeal: true",
+        "    syncOptions:",
+        "    - CreateNamespace=true",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def parse_json_object(response_text: str) -> dict[str, str]:
@@ -726,6 +790,28 @@ def summarize_manifests(
             "target_port": service_port.get("targetPort"),
         },
         "ingress": ingress_summary,
+    }
+
+
+def summarize_argocd_application(application_source: str) -> dict[str, object] | None:
+    if not application_source.strip():
+        return None
+
+    application_doc = yaml.safe_load(application_source)
+    if not isinstance(application_doc, dict):
+        return None
+
+    source = (application_doc.get("spec", {}) or {}).get("source", {}) or {}
+    destination = (application_doc.get("spec", {}) or {}).get("destination", {}) or {}
+    return {
+        "name": ((application_doc.get("metadata", {}) or {}).get("name")),
+        "namespace": ((application_doc.get("metadata", {}) or {}).get("namespace")),
+        "project": ((application_doc.get("spec", {}) or {}).get("project")),
+        "source_path": source.get("path"),
+        "repo_url": source.get("repoURL"),
+        "target_revision": source.get("targetRevision"),
+        "destination_namespace": destination.get("namespace"),
+        "destination_server": destination.get("server"),
     }
 
 
@@ -910,12 +996,15 @@ def main() -> None:
     spec_path = Path(args.spec)
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     service = spec["service"]
-    app_root = spec_path.resolve().parents[1]
+    workspace = spec.get("workspace", {})
+    app_path_str = workspace.get("path", str(spec_path.resolve().parents[1]))
+    manifest_path_str = workspace.get("manifest_path", f"devops/k8s/{Path(app_path_str).name}")
+    app_root = Path(app_path_str).resolve()
     app_dir_name = app_root.name
     source_root = app_root / "src"
     if not app_root.is_dir():
         raise SystemExit(f"Could not resolve application root for spec: {spec_path}")
-    gitops_root = Path("devops/k8s") / app_dir_name
+    gitops_root = Path(manifest_path_str).resolve()
     generated_dir = source_root / "generated"
     contract_path = generated_dir / "spec_contract.py"
     init_path = generated_dir / "__init__.py"
@@ -931,6 +1020,9 @@ def main() -> None:
     deployment_path = gitops_root / "deployment.yaml"
     service_path = gitops_root / "service.yaml"
     ingress_path = gitops_root / "ingress.yaml"
+    argocd_root = Path("devops/k8s/argocd").resolve()
+    argocd_config = argocd_config_from_spec(spec, app_dir_name)
+    argocd_application_path = argocd_root / f"{app_dir_name}-application.yaml"
 
     contract = expected_contract(spec)
     current_files = {
@@ -990,10 +1082,18 @@ def main() -> None:
         service_source = service_manifest_from_spec(spec)
         ingress_source = ingress_manifest_from_spec(spec, app_dir_name)
         app_codegen_provider = "deterministic-template"
+    argocd_application_source = ""
+    if argocd_config["enabled"]:
+        argocd_application_source = argocd_application_manifest_from_spec(
+            spec,
+            app_dir_name,
+            manifest_path_str,
+        )
 
     generated_dir.mkdir(parents=True, exist_ok=True)
     tests_root.mkdir(parents=True, exist_ok=True)
     gitops_root.mkdir(parents=True, exist_ok=True)
+    argocd_root.mkdir(parents=True, exist_ok=True)
     source_root.mkdir(parents=True, exist_ok=True)
     source_init_path.write_text("", encoding="utf-8")
     init_path.write_text("", encoding="utf-8")
@@ -1008,6 +1108,8 @@ def main() -> None:
     deployment_path.write_text(deployment_source, encoding="utf-8")
     service_path.write_text(service_source, encoding="utf-8")
     ingress_path.write_text(ingress_source, encoding="utf-8")
+    if argocd_config["enabled"]:
+        argocd_application_path.write_text(argocd_application_source, encoding="utf-8")
 
     release_id = spec["change_id"]
     evidence_dir = Path(args.output_root) / release_id / "evidence"
@@ -1021,9 +1123,11 @@ def main() -> None:
         "provider": args.provider,
         "app_codegen_provider": app_codegen_provider,
         "gitops_codegen_provider": app_codegen_provider,
+        "argocd_codegen_provider": "deterministic-template" if argocd_config["enabled"] else None,
         "ollama_model": args.ollama_model if args.provider == "ollama" else None,
         "app_path": str(app_root),
         "gitops_path": str(gitops_root),
+        "argocd_application_path": str(argocd_application_path) if argocd_config["enabled"] else None,
         "constants": contract,
         "app_routes": [
             {"method": method, "path": path}
@@ -1035,6 +1139,7 @@ def main() -> None:
             service_source,
             ingress_source,
         ),
+        "argocd_application": summarize_argocd_application(argocd_application_source),
         "generated_files": [
             str(contract_path.resolve()),
             str(source_init_path.resolve()),
@@ -1048,6 +1153,11 @@ def main() -> None:
             str(deployment_path.resolve()),
             str(service_path.resolve()),
             str(ingress_path.resolve()),
+            *(
+                [str(argocd_application_path.resolve())]
+                if argocd_config["enabled"]
+                else []
+            ),
         ],
     }
     (evidence_dir / "codegen-report.json").write_text(
@@ -1057,6 +1167,8 @@ def main() -> None:
     print(f"Generated code artifact: {contract_path}")
     print(f"Generated app source: {app_main_path}")
     print(f"Generated GitOps manifests under: {gitops_root}")
+    if argocd_config["enabled"]:
+        print(f"Generated Argo CD application: {argocd_application_path}")
     print(f"Codegen provider: {args.provider}")
 
 

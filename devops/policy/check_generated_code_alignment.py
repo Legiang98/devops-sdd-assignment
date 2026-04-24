@@ -94,8 +94,14 @@ def main() -> None:
     codegen_report_path = release_dir / "evidence" / "codegen-report.json"
     codegen_report = json.loads(codegen_report_path.read_text(encoding="utf-8"))
     workspace = spec.get("workspace", {})
+    manifest_path_str = workspace.get("manifest_path", f"devops/k8s/{spec_path.resolve().parents[1].name}")
     app_root = Path(workspace.get("path", spec_path.resolve().parents[1])).resolve()
-    manifest_root = Path(workspace.get("manifest_path", f"devops/k8s/{app_root.name}")).resolve()
+    manifest_root = Path(manifest_path_str).resolve()
+    argocd_root = Path("devops/k8s/argocd").resolve()
+    argocd_config = ((spec.get("gitops") or {}).get("argocd") or {})
+    argocd_enabled = argocd_config.get("enabled", True)
+    argocd_application_name = argocd_config.get("application_name", app_root.name)
+    argocd_application_path = argocd_root / f"{app_root.name}-application.yaml"
     dockerfile_path = app_root / workspace.get("dockerfile_path", "Dockerfile")
     tests_root = app_root / workspace.get("tests_path", "tests")
 
@@ -153,6 +159,8 @@ def main() -> None:
         manifest_root / "service.yaml",
         manifest_root / "ingress.yaml",
     }
+    if argocd_enabled:
+        expected_generated.add(argocd_application_path)
     missing_generated = [str(path) for path in expected_generated if path not in generated_files]
     if missing_generated:
         violations.append(
@@ -160,7 +168,11 @@ def main() -> None:
         )
 
     for path in generated_files:
-        if not is_within(path, app_root) and not is_within(path, manifest_root):
+        if (
+            not is_within(path, app_root)
+            and not is_within(path, manifest_root)
+            and not is_within(path, argocd_root)
+        ):
             violations.append(f"generated file outside app/gitops scope: {path}")
 
     if not app_module_path.exists():
@@ -268,6 +280,32 @@ def main() -> None:
         else:
             if "Ingress disabled by spec." not in ingress_text:
                 violations.append("ingress manifest must stay disabled when spec ingress.enabled is false")
+
+    if argocd_enabled:
+        if not argocd_application_path.exists():
+            violations.append(f"missing Argo CD application manifest: {argocd_application_path}")
+        else:
+            argocd_doc = yaml_doc(argocd_application_path)
+            metadata = (argocd_doc or {}).get("metadata", {}) or {}
+            argocd_spec = (argocd_doc or {}).get("spec", {}) or {}
+            source = argocd_spec.get("source", {}) or {}
+            destination = argocd_spec.get("destination", {}) or {}
+            expected_source_path = Path(manifest_path_str).as_posix()
+
+            if (argocd_doc or {}).get("kind") != "Application":
+                violations.append("Argo CD manifest kind must be Application")
+            if metadata.get("namespace") != "argocd":
+                violations.append("Argo CD application namespace must be argocd")
+            if metadata.get("name") != argocd_application_name:
+                violations.append("Argo CD application metadata.name mismatch")
+            if argocd_application_path.name != f"{app_root.name}-application.yaml":
+                violations.append("Argo CD application filename mismatch")
+            if source.get("path") != expected_source_path:
+                violations.append("Argo CD application source.path must match spec.workspace.manifest_path")
+            if destination.get("namespace") != k8s["namespace"]:
+                violations.append("Argo CD application destination namespace mismatch")
+    elif codegen_report.get("argocd_application_path"):
+        violations.append("Argo CD application must not be generated when spec disables it")
 
     report = {
         "release_id": spec["change_id"],

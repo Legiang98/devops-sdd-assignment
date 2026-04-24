@@ -5,6 +5,7 @@ __pycache__/
 .DS_Store
 
 devops/argocd/repo-secret.yaml
+devops/k8s/argocd/repo-secret.yaml
 build/
 .github/actions-runner/
 .logs/

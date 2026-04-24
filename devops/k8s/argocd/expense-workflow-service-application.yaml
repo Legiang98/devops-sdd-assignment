@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: expense-workflow-service
+  namespace: argocd
+spec:
+  destination:
+    namespace: devops-ssd-assignment
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    path: devops/k8s/expense-workflow-service
+    repoURL: git@github.com:Legiang98/devops-sdd-assignment.git
+    targetRevision: HEAD
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

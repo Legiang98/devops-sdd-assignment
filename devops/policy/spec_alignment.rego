@@ -4,6 +4,11 @@ default allow = false
 
 workspace_path := object.get(input.spec, "workspace", {}).path
 manifest_path := object.get(input.spec, "workspace", {}).manifest_path
+argocd_cfg := object.get(object.get(input.spec, "gitops", {}), "argocd", {})
+argocd_enabled := object.get(argocd_cfg, "enabled", true)
+argocd_application_name := object.get(argocd_cfg, "application_name", "")
+default_argocd_application_name := object.get(split(manifest_path, "/"), count(split(manifest_path, "/")) - 1, "")
+effective_argocd_application_name := object.get(argocd_cfg, "application_name", default_argocd_application_name)
 
 has_generated_route(method, path) if {
   some actual in input.generated.codegen_report.app_routes
@@ -201,6 +206,43 @@ deny[msg] {
   not input.spec.deployment.k8s.ingress.enabled
   input.generated.codegen_report.manifest_summary.ingress.enabled
   msg := "ingress manifest must stay disabled when spec ingress.enabled is false"
+}
+
+deny[msg] {
+  argocd_enabled
+  not input.generated.codegen_report.argocd_application
+  msg := "Argo CD application manifest is required"
+}
+
+deny[msg] {
+  argocd_enabled
+  input.generated.codegen_report.argocd_application.name != effective_argocd_application_name
+  msg := "Argo CD application metadata.name mismatch"
+}
+
+deny[msg] {
+  argocd_enabled
+  input.generated.codegen_report.argocd_application.namespace != "argocd"
+  msg := "Argo CD application namespace must be argocd"
+}
+
+deny[msg] {
+  argocd_enabled
+  manifest_path != ""
+  input.generated.codegen_report.argocd_application.source_path != manifest_path
+  msg := "Argo CD application source.path must match spec.workspace.manifest_path"
+}
+
+deny[msg] {
+  argocd_enabled
+  input.generated.codegen_report.argocd_application.destination_namespace != input.spec.deployment.k8s.namespace
+  msg := "Argo CD application destination namespace mismatch"
+}
+
+deny[msg] {
+  not argocd_enabled
+  input.generated.codegen_report.argocd_application
+  msg := "Argo CD application must not be generated when spec disables it"
 }
 
 deny[msg] {
