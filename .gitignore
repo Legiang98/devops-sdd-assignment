@@ -7,3 +7,4 @@ __pycache__/
 devops/argocd/repo-secret.yaml
 build/
 .github/actions-runner/
+.logs/
