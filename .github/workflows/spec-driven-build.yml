@@ -52,25 +52,27 @@ jobs:
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
               SPEC_FILE="applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
             elif [ "${{ github.event_name }}" = "push" ]; then
-              mapfile -t CHANGED_SPECS < <(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')
+              CHANGED_SPECS="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')"
             else
-              mapfile -t CHANGED_SPECS < <(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')
+              CHANGED_SPECS="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')"
             fi
           fi
 
           if [ -z "${SPEC_FILE}" ]; then
-            if [ "${#CHANGED_SPECS[@]}" -eq 0 ]; then
+            CHANGED_COUNT=$(printf '%s\n' "${CHANGED_SPECS}" | sed '/^$/d' | wc -l | tr -d ' ')
+
+            if [ "${CHANGED_COUNT}" -eq 0 ]; then
               echo "No changed spec file detected"
               exit 1
             fi
 
-            if [ "${#CHANGED_SPECS[@]}" -ne 1 ]; then
-              printf 'Expected exactly one changed spec file, got %s:\n' "${#CHANGED_SPECS[@]}"
-              printf '%s\n' "${CHANGED_SPECS[@]}"
+            if [ "${CHANGED_COUNT}" -ne 1 ]; then
+              printf 'Expected exactly one changed spec file, got %s:\n' "${CHANGED_COUNT}"
+              printf '%s\n' "${CHANGED_SPECS}"
               exit 1
             fi
 
-            SPEC_FILE="${CHANGED_SPECS[0]}"
+            SPEC_FILE="$(printf '%s\n' "${CHANGED_SPECS}" | sed '/^$/d' | head -n 1)"
           fi
 
           APP_DIR=$(python3 -c "from pathlib import Path; print(Path('${SPEC_FILE}').parents[1].name)")
@@ -309,7 +311,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "ci(spec): generate code for ${{ needs.resolve.outputs.release_id }} [skip ci]"
+          commit-message: "ci(spec): generate code for ${{ needs.resolve.outputs.release_id }}"
           title: "ci(spec): generated code for ${{ needs.resolve.outputs.release_id }}"
           body: |
             Auto-generated code update from spec-driven pipeline.
