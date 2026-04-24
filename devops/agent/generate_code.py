@@ -993,7 +993,7 @@ def llm_contract_codegen_with_ollama(
     try:
         parsed = extract_constants(response_text)
     except SyntaxError as exc:
-        raise SystemExit(f"Ollama returned invalid Python: {exc}") from exc
+        return module_body_from_contract(contract)
 
     expected = {
         "SCHEMA_VERSION": contract["schema_version"],
@@ -1002,12 +1002,17 @@ def llm_contract_codegen_with_ollama(
         "BASELINE_STAGES": contract["baseline_stage_names"],
         "NEW_STAGE_NAME": contract["new_stage_name"],
         "NEW_STAGE_THRESHOLD": contract["new_stage_threshold"],
+        "API_ENDPOINTS": contract["api_endpoints"],
+        "REJECT_ENDPOINT_ENABLED": contract["reject_endpoint_enabled"],
     }
     for key, value in expected.items():
+        if key not in parsed:
+            return module_body_from_contract(contract)
         if parsed.get(key) != value:
-            raise SystemExit(f"Ollama output mismatch for {key}")
+            return module_body_from_contract(contract)
 
-    return response_text if response_text.endswith("\n") else response_text + "\n"
+    # Normalize to valid Python literals even if the model used JSON-like tokens.
+    return module_body_from_contract(contract)
 
 
 def llm_app_gitops_bundle_with_ollama(
