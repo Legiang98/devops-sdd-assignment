@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 import argparse
 import json
+import sys
 from pathlib import Path
 
-import yaml
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from devops.specs import load_resolved_spec
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,7 +24,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     spec_path = Path(args.spec)
-    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    spec = load_resolved_spec(spec_path)
 
     release_id = spec["change_id"]
     output_dir = Path(args.output_root) / release_id

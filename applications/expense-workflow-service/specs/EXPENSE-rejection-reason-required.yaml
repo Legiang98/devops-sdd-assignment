@@ -12,51 +12,15 @@ intent:
     - No schema change
 
 workflow_change:
-  baseline_stages:
-    - name: manager
-      required_when:
-        amount_gte: 0
   new_stage:
     name: finance
     required_when:
       amount_gte: 1000
-
-workspace:
-  path: applications/expense-workflow-service
-  src_path: src
-  tests_path: tests
-  dockerfile_path: Dockerfile
-  manifest_path: devops/k8s/expense-workflow-service
   
 api_contract:
   endpoints:
     - method: POST
-      path: /expenses
-    - method: POST
-      path: /expenses/{expense_id}/approve
-    - method: POST
       path: /expenses/{expense_id}/reject
-
-docs:
-  swagger:
-    path: /openapi.json
-
-deployment:
-  environment: local
-  strategy: replace
-  rollback_target: BASELINE
-  k8s:
-    namespace: devops-ssd-assignment
-    deployment:
-      name: expense-workflow
-      replicas: 1
-      container_port: 8000
-    service:
-      name: expense-workflow
-      port: 80
-      target_port: 8000
-    ingress:
-      enabled: false
 
 quality:
   unit_tests:

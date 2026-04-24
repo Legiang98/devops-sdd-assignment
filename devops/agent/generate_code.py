@@ -6,10 +6,15 @@ import ast
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from urllib import error, request
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from devops.specs import load_resolved_spec
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -994,7 +999,7 @@ def llm_app_gitops_bundle_with_ollama(
 def main() -> None:
     args = parse_args()
     spec_path = Path(args.spec)
-    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    spec = load_resolved_spec(spec_path)
     service = spec["service"]
     workspace = spec.get("workspace", {})
     app_path_str = workspace.get("path", str(spec_path.resolve().parents[1]))

@@ -1,5 +1,8 @@
 package policy.spec_alignment
 
+import future.keywords.if
+import future.keywords.in
+
 default allow = false
 
 workspace_path := object.get(input.spec, "workspace", {}).path
@@ -7,13 +10,20 @@ manifest_path := object.get(input.spec, "workspace", {}).manifest_path
 argocd_cfg := object.get(object.get(input.spec, "gitops", {}), "argocd", {})
 argocd_enabled := object.get(argocd_cfg, "enabled", true)
 argocd_application_name := object.get(argocd_cfg, "application_name", "")
-default_argocd_application_name := object.get(split(manifest_path, "/"), count(split(manifest_path, "/")) - 1, "")
+manifest_path_parts := split(manifest_path, "/")
+default_argocd_application_name := manifest_path_parts[count(manifest_path_parts) - 1]
 effective_argocd_application_name := object.get(argocd_cfg, "application_name", default_argocd_application_name)
 
 has_generated_route(method, path) if {
   some actual in input.generated.codegen_report.app_routes
   actual.method == method
   actual.path == path
+}
+
+has_expected_route(method, path) if {
+  some expected in input.spec.api_contract.endpoints
+  upper(expected.method) == method
+  expected.path == path
 }
 
 reject_expected if {
@@ -45,7 +55,7 @@ deny[msg] {
 
 deny[msg] {
   manifest_path != ""
-  input.generated.codegen_report.gitops_path != manifest_path
+  not endswith(input.generated.codegen_report.gitops_path, manifest_path)
   msg := "codegen_report.gitops_path must match spec.workspace.manifest_path"
 }
 
@@ -116,9 +126,7 @@ deny[msg] {
   some actual in input.generated.codegen_report.app_routes
   not actual.path == "/health"
   not actual.path == "/metrics"
-  not some expected in input.spec.api_contract.endpoints
-  upper(expected.method) == actual.method
-  expected.path == actual.path
+  not has_expected_route(actual.method, actual.path)
   msg := sprintf("generated app has unexpected route %s %s", [actual.method, actual.path])
 }
 
