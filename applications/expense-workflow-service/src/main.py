@@ -211,41 +211,6 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
     return expense
 
 
-<<<<<<< Updated upstream
-@app.post("/expenses/{expense_id}/reject")
-def reject_expense(expense_id: str, req: RejectExpenseRequest) -> dict[str, Any]:
-    if not REJECT_ENDPOINT_ENABLED:
-        raise HTTPException(status_code=404, detail="Reject endpoint not enabled by spec")
-
-    expense = EXPENSES.get(expense_id)
-    if not expense:
-        raise HTTPException(status_code=404, detail="Expense not found")
-
-    if req.reason_code is None or req.comment is None:
-        rejection_missing_reason_total.inc()
-        raise HTTPException(
-            status_code=400,
-            detail="reason_code and comment are required for rejection",
-        )
-
-    expense["status"] = "REJECTED"
-    expense["rejected_by"] = req.role
-    expense["reason_code"] = req.reason_code
-    expense["comment"] = req.comment
-
-    expense_rejected_total.inc()
-    audit(
-        "expense_rejected",
-        {
-            "expense_id": expense_id,
-            "rejected_by": req.role,
-            "reason_code": req.reason_code,
-        },
-    )
-
-    return expense
-=======
->>>>>>> Stashed changes
 
 
 @app.get("/metrics")

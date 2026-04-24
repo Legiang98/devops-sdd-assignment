@@ -1,3 +1,3 @@
 # Tests Placeholder
 
-Add service-level tests for workflow behavior described in specs.
+Add service-level tests for behavior described in specs.

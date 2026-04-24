@@ -1,3 +1,3 @@
 # Service Source
 
-Runtime service code for the vertical slice.
+Runtime service code for the generated application.
