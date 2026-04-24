@@ -25,11 +25,97 @@ on:
       - ".github/workflows/spec-driven-build.yml"
 
 jobs:
-  pipeline:
+  resolve:
     runs-on: [self-hosted, macOS]
-    permissions:
-      contents: write
-      pull-requests: write
+    outputs:
+      spec_file: ${{ steps.resolve.outputs.spec_file }}
+      release_id: ${{ steps.resolve.outputs.release_id }}
+      app_dir: ${{ steps.resolve.outputs.app_dir }}
+      app_path: ${{ steps.resolve.outputs.app_path }}
+      app_src_dir: ${{ steps.resolve.outputs.app_src_dir }}
+      app_dockerfile: ${{ steps.resolve.outputs.app_dockerfile }}
+      manifest_dir: ${{ steps.resolve.outputs.manifest_dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve spec and release id
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          SPEC_FILE="${{ github.event.inputs.spec_file }}"
+          if [ -z "${SPEC_FILE}" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              SPEC_FILE="applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
+            elif [ "${{ github.event_name }}" = "push" ]; then
+              mapfile -t CHANGED_SPECS < <(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')
+            else
+              mapfile -t CHANGED_SPECS < <(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')
+            fi
+          fi
+
+          if [ -z "${SPEC_FILE}" ]; then
+            if [ "${#CHANGED_SPECS[@]}" -eq 0 ]; then
+              echo "No changed spec file detected"
+              exit 1
+            fi
+
+            if [ "${#CHANGED_SPECS[@]}" -ne 1 ]; then
+              printf 'Expected exactly one changed spec file, got %s:\n' "${#CHANGED_SPECS[@]}"
+              printf '%s\n' "${CHANGED_SPECS[@]}"
+              exit 1
+            fi
+
+            SPEC_FILE="${CHANGED_SPECS[0]}"
+          fi
+
+          APP_DIR=$(python3 -c "from pathlib import Path; print(Path('${SPEC_FILE}').parents[1].name)")
+          APP_PATH="applications/${APP_DIR}"
+          APP_SRC_DIR="${APP_PATH}/src"
+          APP_DOCKERFILE="${APP_PATH}/Dockerfile"
+          MANIFEST_DIR="devops/k8s/${APP_DIR}"
+          RELEASE_ID=$(python3 -c "import yaml, pathlib; s=yaml.safe_load(pathlib.Path('${SPEC_FILE}').read_text(encoding='utf-8')); print(s['change_id'])")
+
+          if [ ! -d "${APP_PATH}" ]; then
+            echo "Application path not found: ${APP_PATH}"
+            exit 1
+          fi
+
+          if [ ! -d "${MANIFEST_DIR}" ]; then
+            echo "GitOps manifest path not found: ${MANIFEST_DIR}"
+            exit 1
+          fi
+
+          if [ ! -f "${APP_DOCKERFILE}" ]; then
+            echo "Dockerfile not found: ${APP_DOCKERFILE}"
+            exit 1
+          fi
+
+          echo "spec_file=$SPEC_FILE" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+          echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_src_dir=$APP_SRC_DIR" >> "$GITHUB_OUTPUT"
+          echo "app_dockerfile=$APP_DOCKERFILE" >> "$GITHUB_OUTPUT"
+          echo "manifest_dir=$MANIFEST_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        run: |
+          {
+            echo "## Resolve"
+            echo ""
+            echo "- Spec: \`${{ steps.resolve.outputs.spec_file }}\`"
+            echo "- Release: \`${{ steps.resolve.outputs.release_id }}\`"
+            echo "- Application: \`${{ steps.resolve.outputs.app_path }}\`"
+            echo "- GitOps: \`${{ steps.resolve.outputs.manifest_dir }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  generate_and_gate:
+    runs-on: [self-hosted, macOS]
+    needs: resolve
     env:
       AGENT_CODEGEN_PROVIDER: ollama
       OLLAMA_MODEL: qwen2.5:7b
@@ -37,6 +123,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -49,27 +137,12 @@ jobs:
         run: |
           curl -sf "${OLLAMA_BASE_URL}/api/tags" >/dev/null
 
-      - name: Resolve spec and release id
-        id: resolve
-        run: |
-          set -euo pipefail
-
-          SPEC_FILE="${{ github.event.inputs.spec_file }}"
-          if [ -z "${SPEC_FILE}" ]; then
-            SPEC_FILE="applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
-          fi
-
-          RELEASE_ID=$(python3 -c "import yaml, pathlib; s=yaml.safe_load(pathlib.Path('${SPEC_FILE}').read_text(encoding='utf-8')); print(s['change_id'])")
-
-          echo "spec_file=$SPEC_FILE" >> "$GITHUB_OUTPUT"
-          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
-
       - name: Run spec pipeline (generate + gate)
         run: |
           . .venv/bin/activate
           ./devops/scripts/trigger-pipeline.sh \
-            "${{ steps.resolve.outputs.spec_file }}" \
-            "${{ steps.resolve.outputs.release_id }}" \
+            "${{ needs.resolve.outputs.spec_file }}" \
+            "${{ needs.resolve.outputs.release_id }}" \
             "${AGENT_CODEGEN_PROVIDER:-deterministic}" \
             "${OLLAMA_MODEL:-qwen2.5:7b}" \
             "${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
@@ -77,19 +150,69 @@ jobs:
       - name: Enforce non-deterministic codegen in CI
         run: |
           set -euo pipefail
-          REPORT="build/releases/${{ steps.resolve.outputs.release_id }}/evidence/codegen-report.json"
+          REPORT="build/releases/${{ needs.resolve.outputs.release_id }}/evidence/codegen-report.json"
           python3 -c "import json, pathlib; r=json.loads(pathlib.Path('${REPORT}').read_text(encoding='utf-8')); p=r.get('provider'); assert p=='ollama', f'Expected provider=ollama, got provider={p!r}'; print(f'Verified codegen provider: {p}')"
+
+      - name: Write summary
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          release_id = "${{ needs.resolve.outputs.release_id }}"
+          evidence = Path("build/releases") / release_id / "evidence"
+          codegen = json.loads((evidence / "codegen-report.json").read_text(encoding="utf-8"))
+          policy = json.loads((evidence / "policy-report.json").read_text(encoding="utf-8"))
+          code_policy = json.loads((evidence / "code-policy-report.json").read_text(encoding="utf-8"))
+
+          print("## Generate And Gate")
+          print()
+          print(f"- Provider: `{codegen['provider']}`")
+          print(f"- App codegen: `{codegen.get('app_codegen_provider')}`")
+          print(f"- GitOps codegen: `{codegen.get('gitops_codegen_provider')}`")
+          print(f"- Policy: `{policy['status']}`")
+          print(f"- Code policy: `{code_policy['status']}`")
+          print(f"- Generated files: `{len(codegen.get('generated_files', []))}`")
+          PY
+
+      - name: Upload generated workspace
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-workspace-${{ needs.resolve.outputs.release_id }}
+          path: |
+            build/releases/${{ needs.resolve.outputs.release_id }}/
+            logs/pipeline.log
+            ${{ needs.resolve.outputs.app_path }}/
+            ${{ needs.resolve.outputs.manifest_dir }}/
+
+  build_and_gitops:
+    runs-on: [self-hosted, macOS]
+    needs: [resolve, generate_and_gate]
+    outputs:
+      image_repository: ${{ steps.image_meta.outputs.image_repository }}
+      image_tag: ${{ steps.image_meta.outputs.image_tag }}
+      has_changes: ${{ steps.generated_changes.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download generated workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-workspace-${{ needs.resolve.outputs.release_id }}
+          path: .
 
       - name: Build app (syntax/build smoke check)
         run: |
-          . .venv/bin/activate
-          python -m compileall applications/expense-workflow-service/src
+          python3 -m compileall "${{ needs.resolve.outputs.app_src_dir }}"
 
       - name: Build image and update GitOps image tag
         id: image_meta
         run: |
           set -euo pipefail
-          IMAGE_REPOSITORY="expense-workflow"
+          IMAGE_REPOSITORY="${{ needs.resolve.outputs.app_dir }}"
           IMAGE_TAG="${GITHUB_SHA::12}"
 
           if ! command -v minikube >/dev/null 2>&1; then
@@ -104,11 +227,11 @@ jobs:
 
           echo "[build] building image directly in minikube"
           minikube image build \
-            -f applications/expense-workflow-service/Dockerfile \
+            -f "${{ needs.resolve.outputs.app_dockerfile }}" \
             -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
             .
 
-          ./devops/scripts/update_image_tag.sh "${IMAGE_REPOSITORY}" "${IMAGE_TAG}"
+          ./devops/scripts/update_image_tag.sh "${{ needs.resolve.outputs.manifest_dir }}" "${IMAGE_REPOSITORY}" "${IMAGE_TAG}"
 
           echo "image_repository=${IMAGE_REPOSITORY}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
@@ -117,44 +240,101 @@ jobs:
         id: generated_changes
         run: |
           set -euo pipefail
-          if git status --porcelain -- applications/expense-workflow-service/src/generated applications/expense-workflow-service/src/main.py devops/k8s/expense-workflow/deployment.yaml devops/k8s/expense-workflow/image-tag.yaml | grep -q .; then
+          if git status --porcelain -- "${{ needs.resolve.outputs.app_path }}/specs" "${{ needs.resolve.outputs.app_path }}/src" "${{ needs.resolve.outputs.app_path }}/tests" "${{ needs.resolve.outputs.app_path }}/Dockerfile" "${{ needs.resolve.outputs.manifest_dir }}" | grep -q .; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Write summary
+        run: |
+          {
+            echo "## Build And GitOps"
+            echo ""
+            echo "- Image: \`${{ steps.image_meta.outputs.image_repository }}:${{ steps.image_meta.outputs.image_tag }}\`"
+            echo "- Changed paths staged scope: \`${{ needs.resolve.outputs.app_path }}\`, \`${{ needs.resolve.outputs.manifest_dir }}\`"
+            echo "- Has changes: \`${{ steps.generated_changes.outputs.has_changes }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload final workspace
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-workspace-${{ needs.resolve.outputs.release_id }}
+          path: |
+            build/releases/${{ needs.resolve.outputs.release_id }}/
+            logs/pipeline.log
+            ${{ needs.resolve.outputs.app_path }}/
+            ${{ needs.resolve.outputs.manifest_dir }}/
+
+  publish:
+    runs-on: [self-hosted, macOS]
+    needs: [resolve, build_and_gitops]
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download final workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: final-workspace-${{ needs.resolve.outputs.release_id }}
+          path: .
+
       - name: Auto-commit generated artifacts on dev
-        if: github.event_name == 'push' && github.ref_name == 'dev' && steps.generated_changes.outputs.has_changes == 'true'
+        if: github.event_name == 'push' && github.ref_name == 'dev' && needs.build_and_gitops.outputs.has_changes == 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add applications/expense-workflow-service/src/generated/
-          git add applications/expense-workflow-service/src/main.py
-          git add devops/k8s/expense-workflow/deployment.yaml devops/k8s/expense-workflow/image-tag.yaml
-          git commit -m "ci(spec): generate code for ${{ steps.resolve.outputs.release_id }} [skip ci]"
+          for path in \
+            "${{ needs.resolve.outputs.app_path }}/specs" \
+            "${{ needs.resolve.outputs.app_path }}/src" \
+            "${{ needs.resolve.outputs.app_path }}/tests" \
+            "${{ needs.resolve.outputs.app_path }}/Dockerfile" \
+            "${{ needs.resolve.outputs.manifest_dir }}"; do
+            if [ -e "$path" ]; then
+              git add "$path"
+            fi
+          done
+          git commit -m "ci(spec): generate code for ${{ needs.resolve.outputs.release_id }}"
           git push origin HEAD:dev
 
       - name: Create PR with generated artifacts on main
-        if: github.event_name == 'push' && github.ref_name == 'main' && steps.generated_changes.outputs.has_changes == 'true'
+        if: github.event_name == 'push' && github.ref_name == 'main' && needs.build_and_gitops.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "ci(spec): generate code for ${{ steps.resolve.outputs.release_id }} [skip ci]"
-          title: "ci(spec): generated code for ${{ steps.resolve.outputs.release_id }}"
+          commit-message: "ci(spec): generate code for ${{ needs.resolve.outputs.release_id }} [skip ci]"
+          title: "ci(spec): generated code for ${{ needs.resolve.outputs.release_id }}"
           body: |
             Auto-generated code update from spec-driven pipeline.
 
-            - Release ID: `${{ steps.resolve.outputs.release_id }}`
-            - Spec: `${{ steps.resolve.outputs.spec_file }}`
+            - Release ID: `${{ needs.resolve.outputs.release_id }}`
+            - Spec: `${{ needs.resolve.outputs.spec_file }}`
             - Source: `${{ github.workflow }} #${{ github.run_number }}`
+            - Image: `${{ needs.build_and_gitops.outputs.image_repository }}:${{ needs.build_and_gitops.outputs.image_tag }}`
           branch: "bot/spec-generate-${{ github.run_id }}"
           base: main
           add-paths: |
-            applications/expense-workflow-service/src/generated/**
-            applications/expense-workflow-service/src/main.py
-            devops/k8s/expense-workflow/deployment.yaml
-            devops/k8s/expense-workflow/image-tag.yaml
+            ${{ needs.resolve.outputs.app_path }}/specs/**
+            ${{ needs.resolve.outputs.app_path }}/src/**
+            ${{ needs.resolve.outputs.app_path }}/tests/**
+            ${{ needs.resolve.outputs.app_path }}/Dockerfile
+            ${{ needs.resolve.outputs.manifest_dir }}/**
+
+      - name: Write summary
+        run: |
+          {
+            echo "## Publish"
+            echo ""
+            echo "- Has changes: \`${{ needs.build_and_gitops.outputs.has_changes }}\`"
+            echo "- Image: \`${{ needs.build_and_gitops.outputs.image_repository }}:${{ needs.build_and_gitops.outputs.image_tag }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload evidence artifacts
         if: always()
@@ -163,6 +343,7 @@ jobs:
           name: spec-driven-evidence-${{ github.run_id }}
           path: |
             logs/pipeline.log
-            build/releases/${{ steps.resolve.outputs.release_id }}/evidence/
-            applications/expense-workflow-service/src/generated/spec_contract.py
-            applications/expense-workflow-service/src/main.py
+            build/releases/${{ needs.resolve.outputs.release_id }}/evidence/
+            ${{ needs.resolve.outputs.app_src_dir }}/generated/spec_contract.py
+            ${{ needs.resolve.outputs.app_src_dir }}/main.py
+            ${{ needs.resolve.outputs.manifest_dir }}/

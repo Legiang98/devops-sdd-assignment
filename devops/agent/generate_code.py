@@ -9,9 +9,6 @@ from urllib import error, request
 
 import yaml
 
-SERVICE_SOURCE_ROOTS = {
-    "expense-workflow": Path("applications/expense-workflow-service/src"),
-}
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
@@ -90,6 +87,44 @@ def module_body_from_contract(contract: dict[str, object]) -> str:
 
 def app_module_body_from_contract(contract: dict[str, object]) -> str:
     reject_enabled = "True" if contract["reject_endpoint_enabled"] else "False"
+    reject_route = ""
+    if contract["reject_endpoint_enabled"]:
+        reject_route = '''
+
+
+@app.post("/expenses/{expense_id}/reject")
+def reject_expense(expense_id: str, req: RejectExpenseRequest) -> dict[str, Any]:
+    if not REJECT_ENDPOINT_ENABLED:
+        raise HTTPException(status_code=404, detail="Reject endpoint not enabled by spec")
+
+    expense = EXPENSES.get(expense_id)
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    if req.reason_code is None or req.comment is None:
+        rejection_missing_reason_total.inc()
+        raise HTTPException(
+            status_code=400,
+            detail="reason_code and comment are required for rejection",
+        )
+
+    expense["status"] = "REJECTED"
+    expense["rejected_by"] = req.role
+    expense["reason_code"] = req.reason_code
+    expense["comment"] = req.comment
+
+    expense_rejected_total.inc()
+    audit(
+        "expense_rejected",
+        {
+            "expense_id": expense_id,
+            "rejected_by": req.role,
+            "reason_code": req.reason_code,
+        },
+    )
+
+    return expense
+'''
     return f'''"""Auto-generated service module from spec. Do not edit manually."""
 
 import json
@@ -303,39 +338,7 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
     return expense
 
 
-@app.post("/expenses/{{expense_id}}/reject")
-def reject_expense(expense_id: str, req: RejectExpenseRequest) -> dict[str, Any]:
-    if not REJECT_ENDPOINT_ENABLED:
-        raise HTTPException(status_code=404, detail="Reject endpoint not enabled by spec")
-
-    expense = EXPENSES.get(expense_id)
-    if not expense:
-        raise HTTPException(status_code=404, detail="Expense not found")
-
-    if req.reason_code is None or req.comment is None:
-        rejection_missing_reason_total.inc()
-        raise HTTPException(
-            status_code=400,
-            detail="reason_code and comment are required for rejection",
-        )
-
-    expense["status"] = "REJECTED"
-    expense["rejected_by"] = req.role
-    expense["reason_code"] = req.reason_code
-    expense["comment"] = req.comment
-
-    expense_rejected_total.inc()
-    audit(
-        "expense_rejected",
-        {{
-            "expense_id": expense_id,
-            "rejected_by": req.role,
-            "reason_code": req.reason_code,
-        }},
-    )
-
-    return expense
-
+{reject_route}
 
 @app.get("/metrics")
 def metrics() -> Response:
@@ -344,6 +347,317 @@ def metrics() -> Response:
 
 setup_tracing()
 '''
+
+
+def namespace_manifest_from_spec(spec: dict) -> str:
+    namespace = spec["deployment"]["k8s"]["namespace"]
+    return (
+        "apiVersion: v1\n"
+        "kind: Namespace\n"
+        "metadata:\n"
+        f"  name: {namespace}\n"
+    )
+
+
+def deployment_manifest_from_spec(spec: dict, image_repository: str) -> str:
+    k8s = spec["deployment"]["k8s"]
+    deployment = k8s["deployment"]
+    service = spec["service"]
+    return (
+        "apiVersion: apps/v1\n"
+        "kind: Deployment\n"
+        "metadata:\n"
+        f"  name: {deployment['name']}\n"
+        f"  namespace: {k8s['namespace']}\n"
+        "  labels:\n"
+        f"    app: {service}\n"
+        "spec:\n"
+        f"  replicas: {deployment['replicas']}\n"
+        "  selector:\n"
+        "    matchLabels:\n"
+        f"      app: {service}\n"
+        "  template:\n"
+        "    metadata:\n"
+        "      labels:\n"
+        f"        app: {service}\n"
+        "    spec:\n"
+        "      containers:\n"
+        "        - name: app\n"
+        f"          image: {image_repository}:latest\n"
+        "          imagePullPolicy: IfNotPresent\n"
+        "          ports:\n"
+        f"            - containerPort: {deployment['container_port']}\n"
+        "              name: http\n"
+        "          env:\n"
+        "            - name: RULES_PATH\n"
+        "              value: /runtime/rules.json\n"
+        "            - name: RELEASE_ID_FILE\n"
+        "              value: /runtime/release_id.txt\n"
+        "            - name: OTEL_EXPORTER_OTLP_ENDPOINT\n"
+        "              value: http://alloy.monitoring.svc.cluster.local:4318\n"
+        "            - name: OTEL_SERVICE_NAME\n"
+        f"              value: {service}\n"
+    )
+
+
+def service_manifest_from_spec(spec: dict) -> str:
+    k8s = spec["deployment"]["k8s"]
+    service = k8s["service"]
+    app_label = spec["service"]
+    return (
+        "apiVersion: v1\n"
+        "kind: Service\n"
+        "metadata:\n"
+        f"  name: {service['name']}\n"
+        f"  namespace: {k8s['namespace']}\n"
+        "spec:\n"
+        "  selector:\n"
+        f"    app: {app_label}\n"
+        "  ports:\n"
+        "    - name: http\n"
+        "      protocol: TCP\n"
+        f"      port: {service['port']}\n"
+        f"      targetPort: {service['target_port']}\n"
+    )
+
+
+def ingress_host_for_app(app_dir_name: str) -> str:
+    return f"{app_dir_name}.localhost"
+
+
+def ingress_manifest_from_spec(spec: dict, app_dir_name: str) -> str:
+    k8s = spec["deployment"]["k8s"]
+    service = k8s["service"]
+    ingress_enabled = k8s.get("ingress", {}).get("enabled", False)
+    host = ingress_host_for_app(app_dir_name)
+
+    if not ingress_enabled:
+        return (
+            "# Ingress disabled by spec.\n"
+            f"# If enabled later, use host http://{host}\n"
+        )
+
+    return (
+        "apiVersion: networking.k8s.io/v1\n"
+        "kind: Ingress\n"
+        "metadata:\n"
+        f"  name: {service['name']}\n"
+        f"  namespace: {k8s['namespace']}\n"
+        "  annotations:\n"
+        "    nginx.ingress.kubernetes.io/rewrite-target: /\n"
+        "spec:\n"
+        "  ingressClassName: nginx\n"
+        "  rules:\n"
+        f"    - host: {host}\n"
+        "      http:\n"
+        "        paths:\n"
+        "          - path: /\n"
+        "            pathType: Prefix\n"
+        "            backend:\n"
+        "              service:\n"
+        f"                name: {service['name']}\n"
+        "                port:\n"
+        f"                  number: {service['port']}\n"
+    )
+
+
+def parse_json_object(response_text: str) -> dict[str, str]:
+    try:
+        data = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Ollama returned invalid JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise SystemExit("Ollama bundle response must be a JSON object")
+
+    for key, value in data.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise SystemExit("Ollama bundle keys and values must be strings")
+    return data
+
+
+def route_map_from_source(module_source: str) -> dict[tuple[str, str], str]:
+    tree = ast.parse(module_source)
+    routes: dict[tuple[str, str], str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            func = decorator.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            if not isinstance(func.value, ast.Name) or func.value.id != "app":
+                continue
+            if not decorator.args:
+                continue
+            first_arg = decorator.args[0]
+            if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
+                continue
+            routes[(func.attr.upper(), first_arg.value)] = node.name
+    return routes
+
+
+def validate_app_source_against_spec(app_source: str, spec: dict) -> list[str]:
+    violations: list[str] = []
+    if "from src.generated.spec_contract import" not in app_source:
+        violations.append("generated app must import src.generated.spec_contract")
+        return violations
+
+    try:
+        routes = route_map_from_source(app_source)
+    except SyntaxError as exc:
+        return [f"generated app source is invalid Python: {exc}"]
+
+    expected_routes = {
+        (str(endpoint["method"]).upper(), endpoint["path"])
+        for endpoint in spec.get("api_contract", {}).get("endpoints", [])
+    }
+    expected_routes.update({("GET", "/health"), ("GET", "/metrics")})
+    for route in sorted(expected_routes):
+        if route not in routes:
+            violations.append(f"generated app missing route {route[0]} {route[1]}")
+
+    reject_expected = any(
+        str(endpoint["method"]).upper() == "POST"
+        and endpoint["path"] == "/expenses/{expense_id}/reject"
+        for endpoint in spec.get("api_contract", {}).get("endpoints", [])
+    )
+    has_reject = ("POST", "/expenses/{expense_id}/reject") in routes
+    if has_reject != reject_expected:
+        violations.append("generated app reject route does not match spec")
+    return violations
+
+
+def summarize_manifests(
+    namespace_source: str,
+    deployment_source: str,
+    service_source: str,
+    ingress_source: str,
+) -> dict[str, object]:
+    namespace_doc = yaml.safe_load(namespace_source) if namespace_source.strip() else None
+    deployment_doc = yaml.safe_load(deployment_source) if deployment_source.strip() else None
+    service_doc = yaml.safe_load(service_source) if service_source.strip() else None
+    ingress_summary: dict[str, object]
+
+    if ingress_source.lstrip().startswith("#"):
+        ingress_summary = {"enabled": False, "kind": None, "host": None, "backend_service": None}
+    else:
+        ingress_doc = yaml.safe_load(ingress_source) if ingress_source.strip() else None
+        rules = ((ingress_doc or {}).get("spec", {}) or {}).get("rules") or []
+        backend_service = None
+        host = None
+        if rules:
+            host = rules[0].get("host")
+            backend_service = (
+                rules[0]
+                .get("http", {})
+                .get("paths", [{}])[0]
+                .get("backend", {})
+                .get("service", {})
+                .get("name")
+            )
+        ingress_summary = {
+            "enabled": True,
+            "kind": (ingress_doc or {}).get("kind"),
+            "host": host,
+            "backend_service": backend_service,
+        }
+
+    deployment_container = (
+        ((deployment_doc or {}).get("spec", {}) or {})
+        .get("template", {})
+        .get("spec", {})
+        .get("containers", [{}])[0]
+    )
+    service_port = (((service_doc or {}).get("spec", {}) or {}).get("ports") or [{}])[0]
+
+    return {
+        "namespace": {
+            "name": ((namespace_doc or {}).get("metadata", {}) or {}).get("name"),
+        },
+        "deployment": {
+            "name": ((deployment_doc or {}).get("metadata", {}) or {}).get("name"),
+            "namespace": ((deployment_doc or {}).get("metadata", {}) or {}).get("namespace"),
+            "replicas": ((deployment_doc or {}).get("spec", {}) or {}).get("replicas"),
+            "container_port": deployment_container.get("ports", [{}])[0].get("containerPort")
+            if deployment_container.get("ports")
+            else None,
+            "image": deployment_container.get("image"),
+        },
+        "service": {
+            "name": ((service_doc or {}).get("metadata", {}) or {}).get("name"),
+            "namespace": ((service_doc or {}).get("metadata", {}) or {}).get("namespace"),
+            "port": service_port.get("port"),
+            "target_port": service_port.get("targetPort"),
+        },
+        "ingress": ingress_summary,
+    }
+
+
+def render_contract_prompt(contract: dict[str, object]) -> str:
+    system_prompt = (PROMPTS_DIR / "codegen_system.txt").read_text(encoding="utf-8").strip()
+    user_template = (PROMPTS_DIR / "codegen_user_template.txt").read_text(encoding="utf-8")
+    user_prompt = user_template.format(
+        schema_version_json=json.dumps(contract["schema_version"]),
+        change_id_json=json.dumps(contract["change_id"]),
+        service_json=json.dumps(contract["service"]),
+        baseline_stages_json=json.dumps(contract["baseline_stage_names"]),
+        new_stage_name_json=json.dumps(contract["new_stage_name"]),
+        new_stage_threshold_json=json.dumps(contract["new_stage_threshold"]),
+        api_endpoints_json=json.dumps(contract["api_endpoints"]),
+        reject_endpoint_enabled_json=json.dumps(contract["reject_endpoint_enabled"]),
+    ).strip()
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def render_app_gitops_prompt(
+    contract: dict[str, object],
+    spec: dict,
+    app_path: Path,
+    gitops_path: Path,
+    current_files: dict[str, str],
+) -> str:
+    system_prompt = (
+        PROMPTS_DIR / "app_gitops_codegen_system.txt"
+    ).read_text(encoding="utf-8").strip()
+    user_template = (
+        PROMPTS_DIR / "app_gitops_codegen_user_template.txt"
+    ).read_text(encoding="utf-8")
+    k8s = spec["deployment"]["k8s"]
+    deployment = k8s["deployment"]
+    service = k8s["service"]
+    app_dir_name = app_path.name
+    user_prompt = user_template.format(
+        app_path=str(app_path),
+        gitops_path=str(gitops_path),
+        schema_version_json=json.dumps(contract["schema_version"]),
+        change_id_json=json.dumps(contract["change_id"]),
+        service_json=json.dumps(contract["service"]),
+        baseline_stages_json=json.dumps(contract["baseline_stage_names"]),
+        new_stage_name_json=json.dumps(contract["new_stage_name"]),
+        new_stage_threshold_json=json.dumps(contract["new_stage_threshold"]),
+        api_endpoints_json=json.dumps(contract["api_endpoints"]),
+        reject_endpoint_enabled_json=json.dumps(contract["reject_endpoint_enabled"]),
+        deployment_environment_json=json.dumps(spec["deployment"]["environment"]),
+        k8s_namespace_json=json.dumps(k8s["namespace"]),
+        k8s_deployment_name_json=json.dumps(deployment["name"]),
+        k8s_replicas_json=json.dumps(deployment["replicas"]),
+        k8s_container_port_json=json.dumps(deployment["container_port"]),
+        k8s_service_name_json=json.dumps(service["name"]),
+        k8s_service_port_json=json.dumps(service["port"]),
+        k8s_service_target_port_json=json.dumps(service["target_port"]),
+        k8s_ingress_enabled_json=json.dumps(k8s.get("ingress", {}).get("enabled", False)),
+        current_app_main_py_json=json.dumps(current_files["app_main_py"]),
+        current_k8s_namespace_yaml_json=json.dumps(current_files["k8s_namespace_yaml"]),
+        current_k8s_deployment_yaml_json=json.dumps(current_files["k8s_deployment_yaml"]),
+        current_k8s_service_yaml_json=json.dumps(current_files["k8s_service_yaml"]),
+        current_k8s_ingress_yaml_json=json.dumps(current_files["k8s_ingress_yaml"]),
+        image_repository_placeholder=app_dir_name,
+        ingress_host=ingress_host_for_app(app_dir_name),
+    ).strip()
+    return f"{system_prompt}\n\n{user_prompt}"
 
 
 def extract_constants(module_source: str) -> dict[str, object]:
@@ -369,29 +683,7 @@ def extract_constants(module_source: str) -> dict[str, object]:
     return constants
 
 
-def render_prompt(contract: dict[str, object]) -> str:
-    system_prompt = (PROMPTS_DIR / "codegen_system.txt").read_text(encoding="utf-8").strip()
-    user_template = (PROMPTS_DIR / "codegen_user_template.txt").read_text(encoding="utf-8")
-    user_prompt = user_template.format(
-        schema_version_json=json.dumps(contract["schema_version"]),
-        change_id_json=json.dumps(contract["change_id"]),
-        service_json=json.dumps(contract["service"]),
-        baseline_stages_json=json.dumps(contract["baseline_stage_names"]),
-        new_stage_name_json=json.dumps(contract["new_stage_name"]),
-        new_stage_threshold_json=json.dumps(contract["new_stage_threshold"]),
-        api_endpoints_json=json.dumps(contract["api_endpoints"]),
-        reject_endpoint_enabled_json=json.dumps(contract["reject_endpoint_enabled"]),
-    ).strip()
-    return f"{system_prompt}\n\n{user_prompt}"
-
-
-def llm_codegen_with_ollama(
-    contract: dict[str, object],
-    model: str,
-    base_url: str,
-) -> str:
-    prompt = render_prompt(contract)
-
+def ollama_generate_text(prompt: str, model: str, base_url: str) -> str:
     payload = {
         "model": model,
         "prompt": prompt,
@@ -415,6 +707,19 @@ def llm_codegen_with_ollama(
     response_text = body.get("response", "").strip()
     if not response_text:
         raise SystemExit("Ollama returned empty code response")
+    return response_text
+
+
+def llm_contract_codegen_with_ollama(
+    contract: dict[str, object],
+    model: str,
+    base_url: str,
+) -> str:
+    response_text = ollama_generate_text(
+        render_contract_prompt(contract),
+        model,
+        base_url,
+    )
 
     try:
         parsed = extract_constants(response_text)
@@ -436,36 +741,124 @@ def llm_codegen_with_ollama(
     return response_text if response_text.endswith("\n") else response_text + "\n"
 
 
+def llm_app_gitops_bundle_with_ollama(
+    contract: dict[str, object],
+    spec: dict,
+    app_path: Path,
+    gitops_path: Path,
+    current_files: dict[str, str],
+    model: str,
+    base_url: str,
+) -> dict[str, str]:
+    response_text = ollama_generate_text(
+        render_app_gitops_prompt(contract, spec, app_path, gitops_path, current_files),
+        model,
+        base_url,
+    )
+    bundle = parse_json_object(response_text)
+
+    expected_keys = {
+        "app_main_py",
+        "k8s_namespace_yaml",
+        "k8s_deployment_yaml",
+        "k8s_service_yaml",
+        "k8s_ingress_yaml",
+    }
+    if set(bundle) != expected_keys:
+        raise SystemExit(
+            f"Ollama bundle keys mismatch: expected {sorted(expected_keys)}, got {sorted(bundle)}"
+        )
+
+    return bundle
+
+
 def main() -> None:
     args = parse_args()
     spec_path = Path(args.spec)
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
-
     service = spec["service"]
-    if service not in SERVICE_SOURCE_ROOTS:
-        raise SystemExit(f"Unsupported service for code generation: {service}")
-
-    source_root = SERVICE_SOURCE_ROOTS[service]
+    app_root = spec_path.resolve().parents[1]
+    app_dir_name = app_root.name
+    source_root = app_root / "src"
+    if not app_root.is_dir():
+        raise SystemExit(f"Could not resolve application root for spec: {spec_path}")
+    gitops_root = Path("devops/k8s") / app_dir_name
+    if not gitops_root.is_dir():
+        raise SystemExit(f"Could not resolve GitOps root for app: {gitops_root}")
     generated_dir = source_root / "generated"
     contract_path = generated_dir / "spec_contract.py"
     init_path = generated_dir / "__init__.py"
     app_main_path = source_root / "main.py"
+    namespace_path = gitops_root / "namespace.yaml"
+    deployment_path = gitops_root / "deployment.yaml"
+    service_path = gitops_root / "service.yaml"
+    ingress_path = gitops_root / "ingress.yaml"
 
     contract = expected_contract(spec)
+    current_files = {
+        "app_main_py": app_main_path.read_text(encoding="utf-8")
+        if app_main_path.exists()
+        else "",
+        "k8s_namespace_yaml": namespace_path.read_text(encoding="utf-8")
+        if namespace_path.exists()
+        else "",
+        "k8s_deployment_yaml": deployment_path.read_text(encoding="utf-8")
+        if deployment_path.exists()
+        else "",
+        "k8s_service_yaml": service_path.read_text(encoding="utf-8")
+        if service_path.exists()
+        else "",
+        "k8s_ingress_yaml": ingress_path.read_text(encoding="utf-8")
+        if ingress_path.exists()
+        else "",
+    }
 
     if args.provider == "ollama":
-        contract_source = llm_codegen_with_ollama(contract, args.ollama_model, args.ollama_base_url)
-        app_source = app_module_body_from_contract(contract)
-        app_codegen_provider = "deterministic-template"
+        contract_source = llm_contract_codegen_with_ollama(
+            contract, args.ollama_model, args.ollama_base_url
+        )
+        bundle = llm_app_gitops_bundle_with_ollama(
+            contract,
+            spec,
+            app_root,
+            gitops_root,
+            current_files,
+            args.ollama_model,
+            args.ollama_base_url,
+        )
+        app_source = bundle["app_main_py"]
+        namespace_source = bundle["k8s_namespace_yaml"]
+        deployment_source = bundle["k8s_deployment_yaml"]
+        service_source = bundle["k8s_service_yaml"]
+        ingress_source = bundle["k8s_ingress_yaml"]
+        app_violations = validate_app_source_against_spec(app_source, spec)
+        if app_violations:
+            app_source = app_module_body_from_contract(contract)
+            namespace_source = namespace_manifest_from_spec(spec)
+            deployment_source = deployment_manifest_from_spec(spec, app_dir_name)
+            service_source = service_manifest_from_spec(spec)
+            ingress_source = ingress_manifest_from_spec(spec, app_dir_name)
+            app_codegen_provider = "ollama-validated-fallback"
+        else:
+            app_codegen_provider = "ollama"
     else:
         contract_source = module_body_from_contract(contract)
         app_source = app_module_body_from_contract(contract)
+        namespace_source = namespace_manifest_from_spec(spec)
+        deployment_source = deployment_manifest_from_spec(spec, app_dir_name)
+        service_source = service_manifest_from_spec(spec)
+        ingress_source = ingress_manifest_from_spec(spec, app_dir_name)
         app_codegen_provider = "deterministic-template"
 
     generated_dir.mkdir(parents=True, exist_ok=True)
+    gitops_root.mkdir(parents=True, exist_ok=True)
     init_path.write_text("", encoding="utf-8")
     contract_path.write_text(contract_source, encoding="utf-8")
     app_main_path.write_text(app_source, encoding="utf-8")
+    namespace_path.write_text(namespace_source, encoding="utf-8")
+    deployment_path.write_text(deployment_source, encoding="utf-8")
+    service_path.write_text(service_source, encoding="utf-8")
+    ingress_path.write_text(ingress_source, encoding="utf-8")
 
     release_id = spec["change_id"]
     evidence_dir = Path(args.output_root) / release_id / "evidence"
@@ -478,11 +871,28 @@ def main() -> None:
         "app_module_path": str(app_main_path),
         "provider": args.provider,
         "app_codegen_provider": app_codegen_provider,
+        "gitops_codegen_provider": app_codegen_provider,
         "ollama_model": args.ollama_model if args.provider == "ollama" else None,
+        "app_path": str(app_root),
+        "gitops_path": str(gitops_root),
         "constants": contract,
+        "app_routes": [
+            {"method": method, "path": path}
+            for method, path in sorted(route_map_from_source(app_source))
+        ],
+        "manifest_summary": summarize_manifests(
+            namespace_source,
+            deployment_source,
+            service_source,
+            ingress_source,
+        ),
         "generated_files": [
-            str(contract_path),
-            str(app_main_path),
+            str(contract_path.resolve()),
+            str(app_main_path.resolve()),
+            str(namespace_path.resolve()),
+            str(deployment_path.resolve()),
+            str(service_path.resolve()),
+            str(ingress_path.resolve()),
         ],
     }
     (evidence_dir / "codegen-report.json").write_text(
@@ -491,6 +901,7 @@ def main() -> None:
 
     print(f"Generated code artifact: {contract_path}")
     print(f"Generated app source: {app_main_path}")
+    print(f"Generated GitOps manifests under: {gitops_root}")
     print(f"Codegen provider: {args.provider}")
 
 

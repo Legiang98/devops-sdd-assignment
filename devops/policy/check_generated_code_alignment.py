@@ -34,6 +34,57 @@ def extract_constants(module_path: Path) -> dict[str, object]:
     return constants
 
 
+def route_map(module_path: Path) -> dict[tuple[str, str], str]:
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    routes: dict[tuple[str, str], str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            func = decorator.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            if not isinstance(func.value, ast.Name) or func.value.id != "app":
+                continue
+            if not decorator.args:
+                continue
+            first_arg = decorator.args[0]
+            if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
+                continue
+            routes[(func.attr.upper(), first_arg.value)] = node.name
+    return routes
+
+
+def app_imports_contract(module_path: Path) -> bool:
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module == "src.generated.spec_contract":
+            return True
+    return False
+
+
+def yaml_doc(path: Path) -> dict | None:
+    text = path.read_text(encoding="utf-8")
+    parsed = yaml.safe_load(text)
+    if parsed is None:
+        return None
+    if not isinstance(parsed, dict):
+        raise SystemExit(f"Expected mapping YAML in {path}")
+    return parsed
+
+
+def is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def main() -> None:
     args = parse_args()
     spec_path = Path(args.spec)
@@ -42,9 +93,16 @@ def main() -> None:
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     codegen_report_path = release_dir / "evidence" / "codegen-report.json"
     codegen_report = json.loads(codegen_report_path.read_text(encoding="utf-8"))
+    workspace = spec.get("workspace", {})
+    app_root = Path(workspace.get("path", spec_path.resolve().parents[1])).resolve()
+    manifest_root = Path(workspace.get("manifest_path", f"devops/k8s/{app_root.name}")).resolve()
 
     module_path = Path(codegen_report["module_path"])
     module_constants = extract_constants(module_path)
+    app_module_path = Path(
+        codegen_report.get("app_module_path", app_root / "src" / "main.py")
+    ).resolve()
+    generated_files = [Path(p).resolve() for p in codegen_report.get("generated_files", [])]
 
     violations: list[str] = []
 
@@ -78,6 +136,124 @@ def main() -> None:
 
     if module_constants.get("NEW_STAGE_THRESHOLD") != expected_new_stage_threshold:
         violations.append("generated code NEW_STAGE_THRESHOLD mismatch")
+
+    expected_generated = {
+        app_root / "src" / "generated" / "spec_contract.py",
+        app_root / "src" / "main.py",
+        manifest_root / "namespace.yaml",
+        manifest_root / "deployment.yaml",
+        manifest_root / "service.yaml",
+        manifest_root / "ingress.yaml",
+    }
+    missing_generated = [str(path) for path in expected_generated if path not in generated_files]
+    if missing_generated:
+        violations.append(
+            f"generated_files missing expected outputs: {', '.join(sorted(missing_generated))}"
+        )
+
+    for path in generated_files:
+        if not is_within(path, app_root) and not is_within(path, manifest_root):
+            violations.append(f"generated file outside app/gitops scope: {path}")
+
+    if not app_module_path.exists():
+        violations.append(f"generated app module missing: {app_module_path}")
+    else:
+        if not app_imports_contract(app_module_path):
+            violations.append("generated app must import src.generated.spec_contract")
+
+        actual_routes = route_map(app_module_path)
+        expected_routes = {
+            (str(endpoint["method"]).upper(), endpoint["path"])
+            for endpoint in spec.get("api_contract", {}).get("endpoints", [])
+        }
+        expected_routes.update({("GET", "/health"), ("GET", "/metrics")})
+        for route in sorted(expected_routes):
+            if route not in actual_routes:
+                violations.append(f"generated app missing route {route[0]} {route[1]}")
+
+        has_reject = ("POST", "/expenses/{expense_id}/reject") in actual_routes
+        reject_expected = any(
+            str(endpoint["method"]).upper() == "POST"
+            and endpoint["path"] == "/expenses/{expense_id}/reject"
+            for endpoint in spec.get("api_contract", {}).get("endpoints", [])
+        )
+        if has_reject != reject_expected:
+            violations.append("generated app reject route does not match spec")
+
+    namespace_path = manifest_root / "namespace.yaml"
+    deployment_path = manifest_root / "deployment.yaml"
+    service_path = manifest_root / "service.yaml"
+    ingress_path = manifest_root / "ingress.yaml"
+    k8s = spec["deployment"]["k8s"]
+
+    if not namespace_path.exists():
+        violations.append(f"missing manifest: {namespace_path}")
+    else:
+        namespace_doc = yaml_doc(namespace_path)
+        if namespace_doc is not None and namespace_doc.get("metadata", {}).get("name") != k8s["namespace"]:
+            violations.append("namespace manifest name mismatch")
+
+    if not deployment_path.exists():
+        violations.append(f"missing manifest: {deployment_path}")
+    else:
+        deployment_doc = yaml_doc(deployment_path)
+        container = (
+            deployment_doc.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+            .get("containers", [{}])[0]
+        )
+        if deployment_doc.get("metadata", {}).get("name") != k8s["deployment"]["name"]:
+            violations.append("deployment manifest name mismatch")
+        if deployment_doc.get("metadata", {}).get("namespace") != k8s["namespace"]:
+            violations.append("deployment manifest namespace mismatch")
+        if deployment_doc.get("spec", {}).get("replicas") != k8s["deployment"]["replicas"]:
+            violations.append("deployment replicas mismatch")
+        port = (container.get("ports") or [{}])[0].get("containerPort")
+        if port != k8s["deployment"]["container_port"]:
+            violations.append("deployment container_port mismatch")
+        if not container.get("image"):
+            violations.append("deployment image is required")
+
+    if not service_path.exists():
+        violations.append(f"missing manifest: {service_path}")
+    else:
+        service_doc = yaml_doc(service_path)
+        service_port = (service_doc.get("spec", {}).get("ports") or [{}])[0]
+        if service_doc.get("metadata", {}).get("name") != k8s["service"]["name"]:
+            violations.append("service manifest name mismatch")
+        if service_doc.get("metadata", {}).get("namespace") != k8s["namespace"]:
+            violations.append("service manifest namespace mismatch")
+        if service_port.get("port") != k8s["service"]["port"]:
+            violations.append("service port mismatch")
+        if service_port.get("targetPort") != k8s["service"]["target_port"]:
+            violations.append("service targetPort mismatch")
+
+    ingress_enabled = k8s.get("ingress", {}).get("enabled", False)
+    if not ingress_path.exists():
+        violations.append(f"missing manifest: {ingress_path}")
+    else:
+        ingress_text = ingress_path.read_text(encoding="utf-8")
+        if ingress_enabled:
+            ingress_doc = yaml_doc(ingress_path)
+            if ingress_doc is None or ingress_doc.get("kind") != "Ingress":
+                violations.append("ingress manifest must be a Kubernetes Ingress when enabled")
+            else:
+                rules = ingress_doc.get("spec", {}).get("rules") or []
+                if not rules:
+                    violations.append("ingress rules are required when ingress is enabled")
+                backend_service = (
+                    rules[0]
+                    .get("http", {})
+                    .get("paths", [{}])[0]
+                    .get("backend", {})
+                    .get("service", {})
+                )
+                if backend_service.get("name") != k8s["service"]["name"]:
+                    violations.append("ingress backend service mismatch")
+        else:
+            if "Ingress disabled by spec." not in ingress_text:
+                violations.append("ingress manifest must stay disabled when spec ingress.enabled is false")
 
     report = {
         "release_id": spec["change_id"],

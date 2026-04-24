@@ -61,7 +61,7 @@ docker compose restart app
 - Policy gate: `devops/policy/check_spec_alignment.py`
 - Release artifacts: `build/releases/<RELEASE_ID>/`
 - Deploy pointer and audit history: `deploy/current`, `deploy/history.log`
-- Kubernetes manifests: `devops/k8s/<service>/`
+- Kubernetes manifests: `devops/k8s/<service>/` and `devops/k8s/argocd/`
 - Argo CD placeholder: `devops/argocd/application.yaml`
 - Observability verification: `devops/observability/verify_behavior.py`
 

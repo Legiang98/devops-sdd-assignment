@@ -211,6 +211,7 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
     return expense
 
 
+<<<<<<< Updated upstream
 @app.post("/expenses/{expense_id}/reject")
 def reject_expense(expense_id: str, req: RejectExpenseRequest) -> dict[str, Any]:
     if not REJECT_ENDPOINT_ENABLED:
@@ -243,6 +244,8 @@ def reject_expense(expense_id: str, req: RejectExpenseRequest) -> dict[str, Any]
     )
 
     return expense
+=======
+>>>>>>> Stashed changes
 
 
 @app.get("/metrics")

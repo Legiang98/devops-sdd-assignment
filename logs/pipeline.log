@@ -170,3 +170,109 @@ Codegen provider: ollama
 Policy gate passed
 Generated code policy passed
 [trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=deterministic
+Generated release artifacts: build/releases/EXP-LOCAL-GENERATE-CHECK
+Generated code artifact: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/generated/spec_contract.py
+Generated app source: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/main.py
+Generated GitOps manifests under: devops/k8s/expense-workflow-service
+Codegen provider: deterministic
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-local-generate-check.yaml
+[gate] release_dir=build/releases/EXP-LOCAL-GENERATE-CHECK
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy failed:
+- generated app reject route does not match spec
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=deterministic
+Generated release artifacts: build/releases/EXP-LOCAL-GENERATE-CHECK
+Generated code artifact: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/generated/spec_contract.py
+Generated app source: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/main.py
+Generated GitOps manifests under: devops/k8s/expense-workflow-service
+Codegen provider: deterministic
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-local-generate-check.yaml
+[gate] release_dir=build/releases/EXP-LOCAL-GENERATE-CHECK
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=ollama
+Generated release artifacts: build/releases/EXP-LOCAL-GENERATE-CHECK
+Generated code artifact: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/generated/spec_contract.py
+Generated app source: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/main.py
+Generated GitOps manifests under: devops/k8s/expense-workflow-service
+Codegen provider: ollama
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-local-generate-check.yaml
+[gate] release_dir=build/releases/EXP-LOCAL-GENERATE-CHECK
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy failed:
+- generated app reject route does not match spec
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=ollama
+Generated release artifacts: build/releases/EXP-LOCAL-GENERATE-CHECK
+Generated code artifact: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/generated/spec_contract.py
+Generated app source: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/main.py
+Generated GitOps manifests under: devops/k8s/expense-workflow-service
+Codegen provider: ollama
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-local-generate-check.yaml
+[gate] release_dir=build/releases/EXP-LOCAL-GENERATE-CHECK
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=deterministic
+Generated release artifacts: build/releases/EXP-LOCAL-GENERATE-CHECK
+Generated code artifact: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/generated/spec_contract.py
+Generated app source: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/main.py
+Generated GitOps manifests under: devops/k8s/expense-workflow-service
+Codegen provider: deterministic
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-local-generate-check.yaml
+[gate] release_dir=build/releases/EXP-LOCAL-GENERATE-CHECK
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=ollama
+Generated release artifacts: build/releases/EXP-LOCAL-GENERATE-CHECK
+Ollama returned invalid app_main_py: expected ':' (<unknown>, line 192)
+Traceback (most recent call last):
+  File "/Users/lesip/Projects/side-project/devops-ssd-assignment/devops/agent/generate.py", line 71, in <module>
+    main()
+    ~~~~^^
+  File "/Users/lesip/Projects/side-project/devops-ssd-assignment/devops/agent/generate.py", line 67, in main
+    subprocess.run(codegen_cmd, check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/Library/Frameworks/Python.framework/Versions/3.14/bin/python3', 'devops/agent/generate_code.py', '--spec', 'applications/expense-workflow-service/specs/EXPENSE-local-generate-check.yaml', '--output-root', 'build/releases', '--provider', 'ollama', '--ollama-model', 'qwen2.5:7b', '--ollama-base-url', 'http://127.0.0.1:11434']' returned non-zero exit status 1.
+[trigger-pipeline] start
+[trigger-pipeline] step 1/2: agent generation
+[trigger-pipeline] codegen_provider=ollama
+Generated release artifacts: build/releases/EXP-LOCAL-GENERATE-CHECK
+Generated code artifact: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/generated/spec_contract.py
+Generated app source: /Users/lesip/Projects/side-project/devops-ssd-assignment/applications/expense-workflow-service/src/main.py
+Generated GitOps manifests under: devops/k8s/expense-workflow-service
+Codegen provider: ollama
+[trigger-pipeline] step 2/2: policy gate
+[gate] spec=applications/expense-workflow-service/specs/EXPENSE-local-generate-check.yaml
+[gate] release_dir=build/releases/EXP-LOCAL-GENERATE-CHECK
+[gate] opa not found, skipping Rego checks
+Policy gate passed
+Generated code policy passed
+[trigger-pipeline] pipeline passed

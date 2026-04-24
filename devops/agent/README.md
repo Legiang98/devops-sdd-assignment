@@ -15,7 +15,9 @@ Codegen provider options:
 Prompt files for Ollama codegen:
 - `prompts/codegen_system.txt`
 - `prompts/codegen_user_template.txt`
+- `prompts/app_gitops_codegen_system.txt`
+- `prompts/app_gitops_codegen_user_template.txt`
 
 Notes:
 - In `ollama` mode, contract module generation uses Ollama with strict constant validation.
-- Service module generation uses a deterministic template derived from spec contract.
+- Full app source and matching GitOps manifests are generated from spec within the target app scope.

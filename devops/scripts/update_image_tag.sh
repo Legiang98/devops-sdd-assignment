@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-  echo "Usage: $0 <IMAGE_REPOSITORY> <IMAGE_TAG>"
+if [ "$#" -ne 3 ]; then
+  echo "Usage: $0 <SERVICE_MANIFEST_DIR> <IMAGE_REPOSITORY> <IMAGE_TAG>"
   exit 1
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IMAGE_REPOSITORY="$1"
-IMAGE_TAG="$2"
-SERVICE_MANIFEST_DIR="$ROOT/devops/k8s/expense-workflow"
+SERVICE_MANIFEST_DIR="$ROOT/$1"
+IMAGE_REPOSITORY="$2"
+IMAGE_TAG="$3"
 OUT_FILE="$SERVICE_MANIFEST_DIR/image-tag.yaml"
 DEPLOYMENT_FILE="$SERVICE_MANIFEST_DIR/deployment.yaml"
+
+if [ ! -f "$DEPLOYMENT_FILE" ]; then
+  echo "Deployment manifest not found: $DEPLOYMENT_FILE"
+  exit 1
+fi
 
 cat > "$OUT_FILE" <<YAML
 # Auto-updated by CI pipeline.

@@ -21,6 +21,13 @@ workflow_change:
     required_when:
       amount_gte: 1000
 
+workspace:
+  path: applications/expense-workflow-service
+  src_path: src
+  tests_path: tests
+  dockerfile_path: Dockerfile
+  manifest_path: devops/k8s/expense-workflow-service
+  
 api_contract:
   endpoints:
     - method: POST

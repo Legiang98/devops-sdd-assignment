@@ -4,6 +4,7 @@ Each microservice gets its own folder under `devops/k8s/`.
 Add a new service by creating a new sibling directory with that service's manifests.
 
 Current layout:
+- `argocd/`: namespace, ingress, repository secret, and `Application` manifests for Argo CD bootstrap
 - `expense-workflow/`: namespace, deployment, service, ingress, and image tag manifests for the expense service
 
 For Minikube localhost ingress:

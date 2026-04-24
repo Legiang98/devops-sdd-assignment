@@ -17,7 +17,11 @@ spec:
     spec:
       containers:
         - name: app
+<<<<<<< Updated upstream:devops/k8s/expense-workflow/deployment.yaml
           image: expense-workflow:38f25e6954e7
+=======
+          image: expense-workflow-service:latest
+>>>>>>> Stashed changes:devops/k8s/expense-workflow-service/deployment.yaml
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

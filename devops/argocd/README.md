@@ -2,6 +2,8 @@
 
 GitOps handoff from Git to cluster via Argo CD Applications.
 
+Canonical Kubernetes-facing manifests now live under `devops/k8s/argocd/`.
+
 ## Applications
 
 - `application.yaml`: deploys the expense service manifests from `devops/k8s/expense-workflow` into namespace `devops-ssd-assignment`.
