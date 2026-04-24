@@ -1,3 +1,5 @@
+"""Auto-generated service module from spec. Do not edit manually."""
+
 import json
 import os
 import time
@@ -5,18 +7,28 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 
+from src.generated.spec_contract import (
+    BASELINE_STAGES,
+    CHANGE_ID,
+    NEW_STAGE_NAME,
+    NEW_STAGE_THRESHOLD,
+    SCHEMA_VERSION,
+    SERVICE,
+)
+
 RULES_PATH = os.getenv("RULES_PATH", "deploy/current/rules.json")
 RELEASE_ID_FILE = os.getenv("RELEASE_ID_FILE", "deploy/current/release_id.txt")
+REJECT_ENDPOINT_ENABLED = False
 
 app = FastAPI(title="Expense Workflow Service")
 
@@ -28,6 +40,10 @@ approval_step_completed_total = Counter(
     "approval_step_completed_total", "Completed approvals by step", ["step"]
 )
 expense_approved_total = Counter("expense_approved_total", "Fully approved expenses")
+expense_rejected_total = Counter("expense_rejected_total", "Rejected expenses")
+rejection_missing_reason_total = Counter(
+    "rejection_missing_reason_total", "Rejected requests missing reason fields"
+)
 
 EXPENSES: dict[str, dict[str, Any]] = {}
 
@@ -40,9 +56,15 @@ def setup_tracing() -> None:
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "http://otel-collector.monitoring.svc.cluster.local:4318",
     ).rstrip("/")
-    service_name = os.getenv("OTEL_SERVICE_NAME", "expense-workflow-service")
+    service_name = os.getenv("OTEL_SERVICE_NAME", SERVICE)
 
-    resource = Resource.create({"service.name": service_name})
+    resource = Resource.create(
+        {
+            "service.name": service_name,
+            "spec.schema_version": SCHEMA_VERSION,
+            "spec.change_id": CHANGE_ID,
+        }
+    )
     provider = TracerProvider(resource=resource)
     provider.add_span_processor(
         BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"))
@@ -60,17 +82,37 @@ class ApproveExpenseRequest(BaseModel):
     role: str
 
 
+class RejectExpenseRequest(BaseModel):
+    role: str
+    reason_code: str | None = None
+    comment: str | None = None
+
+
 def read_release_id() -> str:
     try:
         with open(RELEASE_ID_FILE, "r", encoding="utf-8") as f:
-            return f.read().strip()
+            value = f.read().strip()
+            return value or CHANGE_ID
     except FileNotFoundError:
-        return "UNKNOWN"
+        return CHANGE_ID
 
 
 def load_rules() -> dict[str, Any]:
-    with open(RULES_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(RULES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        stages = [{"name": s, "required_when": {"amount_gte": 0}} for s in BASELINE_STAGES]
+        if NEW_STAGE_NAME is not None:
+            stages.append(
+                {
+                    "name": NEW_STAGE_NAME,
+                    "required_when": {
+                        "amount_gte": 0 if NEW_STAGE_THRESHOLD is None else NEW_STAGE_THRESHOLD
+                    },
+                }
+            )
+        return {"workflow": {"stages": stages}}
 
 
 def required_stages_for_amount(amount: float, rules: dict[str, Any]) -> list[str]:
@@ -86,6 +128,8 @@ def audit(event: str, payload: dict[str, Any]) -> None:
     log_line = {
         "ts": int(time.time()),
         "release_id": read_release_id(),
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
         "event": event,
         "payload": payload,
     }
@@ -94,7 +138,12 @@ def audit(event: str, payload: dict[str, Any]) -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "release_id": read_release_id()}
+    return {
+        "status": "ok",
+        "release_id": read_release_id(),
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+    }
 
 
 @app.post("/expenses")
@@ -134,6 +183,9 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
 
+    if expense["status"] == "REJECTED":
+        raise HTTPException(status_code=400, detail="Expense already rejected")
+
     if req.role not in expense["required_stages"]:
         raise HTTPException(status_code=400, detail=f"Role {req.role} is not required")
 
@@ -153,6 +205,40 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
             "expense_id": expense_id,
             "approved_role": req.role,
             "status": expense["status"],
+        },
+    )
+
+    return expense
+
+
+@app.post("/expenses/{expense_id}/reject")
+def reject_expense(expense_id: str, req: RejectExpenseRequest) -> dict[str, Any]:
+    if not REJECT_ENDPOINT_ENABLED:
+        raise HTTPException(status_code=404, detail="Reject endpoint not enabled by spec")
+
+    expense = EXPENSES.get(expense_id)
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    if req.reason_code is None or req.comment is None:
+        rejection_missing_reason_total.inc()
+        raise HTTPException(
+            status_code=400,
+            detail="reason_code and comment are required for rejection",
+        )
+
+    expense["status"] = "REJECTED"
+    expense["rejected_by"] = req.role
+    expense["reason_code"] = req.reason_code
+    expense["comment"] = req.comment
+
+    expense_rejected_total.inc()
+    audit(
+        "expense_rejected",
+        {
+            "expense_id": expense_id,
+            "rejected_by": req.role,
+            "reason_code": req.reason_code,
         },
     )
 
