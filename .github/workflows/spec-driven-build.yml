@@ -123,6 +123,7 @@ jobs:
       AGENT_CODEGEN_PROVIDER: ollama
       OLLAMA_MODEL: qwen2.5:7b
       OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_TIMEOUT_SECONDS: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -147,7 +148,8 @@ jobs:
             "${{ needs.resolve.outputs.spec_file }}" \
             "${AGENT_CODEGEN_PROVIDER:-deterministic}" \
             "${OLLAMA_MODEL:-qwen2.5:7b}" \
-            "${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+            "${OLLAMA_BASE_URL:-http://127.0.0.1:11434}" \
+            "${OLLAMA_TIMEOUT_SECONDS:-180}"
 
       - name: Run policy gate
         run: |

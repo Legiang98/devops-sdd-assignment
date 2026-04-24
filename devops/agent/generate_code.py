@@ -39,6 +39,12 @@ def parse_args() -> argparse.Namespace:
         default="http://127.0.0.1:11434",
         help="Ollama base URL",
     )
+    parser.add_argument(
+        "--ollama-timeout-seconds",
+        type=int,
+        default=60,
+        help="Ollama request timeout in seconds",
+    )
     return parser.parse_args()
 
 
@@ -923,7 +929,7 @@ def extract_constants(module_source: str) -> dict[str, object]:
     return constants
 
 
-def ollama_generate_text(prompt: str, model: str, base_url: str) -> str:
+def ollama_generate_text(prompt: str, model: str, base_url: str, timeout_seconds: int) -> str:
     payload = {
         "model": model,
         "prompt": prompt,
@@ -939,7 +945,7 @@ def ollama_generate_text(prompt: str, model: str, base_url: str) -> str:
     )
 
     try:
-        with request.urlopen(req, timeout=60) as resp:
+        with request.urlopen(req, timeout=timeout_seconds) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except error.URLError as exc:
         raise SystemExit(f"Ollama request failed: {exc}") from exc
@@ -954,11 +960,13 @@ def llm_contract_codegen_with_ollama(
     contract: dict[str, object],
     model: str,
     base_url: str,
+    timeout_seconds: int,
 ) -> str:
     response_text = ollama_generate_text(
         render_contract_prompt(contract),
         model,
         base_url,
+        timeout_seconds,
     )
 
     try:
@@ -989,11 +997,13 @@ def llm_app_gitops_bundle_with_ollama(
     current_files: dict[str, str],
     model: str,
     base_url: str,
+    timeout_seconds: int,
 ) -> dict[str, str]:
     response_text = ollama_generate_text(
         render_app_gitops_prompt(contract, spec, app_path, gitops_path, current_files),
         model,
         base_url,
+        timeout_seconds,
     )
     bundle = parse_json_object(response_text)
 
@@ -1066,7 +1076,7 @@ def main() -> None:
 
     if args.provider == "ollama":
         contract_source = llm_contract_codegen_with_ollama(
-            contract, args.ollama_model, args.ollama_base_url
+            contract, args.ollama_model, args.ollama_base_url, args.ollama_timeout_seconds
         )
         bundle = llm_app_gitops_bundle_with_ollama(
             contract,
@@ -1076,6 +1086,7 @@ def main() -> None:
             current_files,
             args.ollama_model,
             args.ollama_base_url,
+            args.ollama_timeout_seconds,
         )
         app_source = bundle["app_main_py"]
         namespace_source = bundle["k8s_namespace_yaml"]

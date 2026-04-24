@@ -27,6 +27,12 @@ def parse_args() -> argparse.Namespace:
         help="Ollama base URL",
     )
     parser.add_argument(
+        "--ollama-timeout-seconds",
+        type=int,
+        default=60,
+        help="Ollama request timeout in seconds",
+    )
+    parser.add_argument(
         "--simulate-mismatch",
         action="store_true",
         help="Intentionally generate wrong threshold for policy-gate demo",
@@ -61,6 +67,8 @@ def main() -> None:
         args.ollama_model,
         "--ollama-base-url",
         args.ollama_base_url,
+        "--ollama-timeout-seconds",
+        str(args.ollama_timeout_seconds),
     ]
 
     subprocess.run(agent_cmd, check=True)
