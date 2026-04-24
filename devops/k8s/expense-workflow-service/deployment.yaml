@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: expense-workflow-service:latest
+          image: expense-workflow:38f25e6954e7
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

@@ -27,6 +27,8 @@ api_contract:
       path: /expenses
     - method: POST
       path: /expenses/{expense_id}/approve
+    - method: POST
+      path: /expenses/{expense_id}/reject
 
 docs:
   swagger:
