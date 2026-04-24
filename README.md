@@ -41,7 +41,7 @@ python devops/observability/verify_behavior.py --base-url http://localhost:8000
 ### Optional: Minikube monitoring stack (OTel + Alloy + Tempo + Grafana)
 
 ```bash
-./devops/scripts/setup_monitoring_minikube.sh
+./devops/scripts/setup_observability_minikube.sh
 ```
 
 Guide: `devops/observability/monitoring-minikube.md`
@@ -61,7 +61,7 @@ docker compose restart app
 - Policy gate: `devops/policy/check_spec_alignment.py`
 - Release artifacts: `build/releases/<RELEASE_ID>/`
 - Deploy pointer and audit history: `deploy/current`, `deploy/history.log`
-- Kubernetes placeholders: `devops/k8s/`
+- Kubernetes manifests: `devops/k8s/<service>/`
 - Argo CD placeholder: `devops/argocd/application.yaml`
 - Observability verification: `devops/observability/verify_behavior.py`
 

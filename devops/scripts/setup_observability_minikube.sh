@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-MANIFEST_DIR="devops/monitoring/minikube"
+MANIFEST_DIR="devops/observability/minikube"
 
 if ! command -v kubectl >/dev/null 2>&1; then
   echo "kubectl is required"

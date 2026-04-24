@@ -17,7 +17,7 @@ main() {
   echo "[trigger-pipeline] start"
   echo "[trigger-pipeline] step 1/2: agent generation"
   echo "[trigger-pipeline] codegen_provider=$CODEGEN_PROVIDER"
-  python devops/agent/generate.py \
+  python3 devops/agent/generate.py \
     --spec "$SPEC" \
     --codegen-provider "$CODEGEN_PROVIDER" \
     --ollama-model "$OLLAMA_MODEL" \

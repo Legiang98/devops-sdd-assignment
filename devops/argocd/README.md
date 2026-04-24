@@ -4,12 +4,12 @@ GitOps handoff from Git to cluster via Argo CD Applications.
 
 ## Applications
 
-- `application.yaml`: deploys business service manifests from `devops/k8s` into namespace `devops-ssd-assignment`.
-- `monitoring-application.yaml`: deploys monitoring stack from `devops/monitoring/minikube` into namespace `monitoring`.
+- `application.yaml`: deploys the expense service manifests from `devops/k8s/expense-workflow` into namespace `devops-ssd-assignment`.
+- `observability-application.yaml`: deploys the observability stack from `devops/observability/minikube` into namespace `monitoring`.
 
 ## Apply
 
 ```bash
 kubectl apply -f devops/argocd/application.yaml
-kubectl apply -f devops/argocd/monitoring-application.yaml
+kubectl apply -f devops/argocd/observability-application.yaml
 ```

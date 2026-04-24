@@ -11,7 +11,7 @@ OLLAMA_BASE_URL="${4:-http://127.0.0.1:11434}"
 
 echo "[generate] spec=$SPEC"
 echo "[generate] codegen_provider=$CODEGEN_PROVIDER"
-python devops/agent/generate.py \
+python3 devops/agent/generate.py \
   --spec "$SPEC" \
   --codegen-provider "$CODEGEN_PROVIDER" \
   --ollama-model "$OLLAMA_MODEL" \

@@ -11,15 +11,15 @@ All components run in namespace `monitoring`.
 ## 1) Deploy stack
 
 ```bash
-./devops/scripts/setup_monitoring_minikube.sh
+./devops/scripts/setup_observability_minikube.sh
 ```
 
 ## 2) Deploy app (if not already)
 
 ```bash
-kubectl apply -f devops/k8s/namespace.yaml
-kubectl apply -f devops/k8s/deployment.yaml
-kubectl apply -f devops/k8s/service.yaml
+kubectl apply -f devops/k8s/expense-workflow/namespace.yaml
+kubectl apply -f devops/k8s/expense-workflow/deployment.yaml
+kubectl apply -f devops/k8s/expense-workflow/service.yaml
 ```
 
 The app is configured to export traces to Alloy:
@@ -72,4 +72,4 @@ In Grafana Explore, select `Tempo` datasource and search traces for service `exp
 - This is local-first and intentionally minimal.
 - No ingress is used; use `kubectl port-forward` in Minikube.
 - Grafana credentials are plain text for local development only.
-- GitOps option with Argo CD: apply `devops/argocd/monitoring-application.yaml`.
+- GitOps option with Argo CD: apply `devops/argocd/observability-application.yaml`.

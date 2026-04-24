@@ -9,8 +9,9 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE_REPOSITORY="$1"
 IMAGE_TAG="$2"
-OUT_FILE="$ROOT/devops/k8s/image-tag.yaml"
-DEPLOYMENT_FILE="$ROOT/devops/k8s/deployment.yaml"
+SERVICE_MANIFEST_DIR="$ROOT/devops/k8s/expense-workflow"
+OUT_FILE="$SERVICE_MANIFEST_DIR/image-tag.yaml"
+DEPLOYMENT_FILE="$SERVICE_MANIFEST_DIR/deployment.yaml"
 
 cat > "$OUT_FILE" <<YAML
 # Auto-updated by CI pipeline.

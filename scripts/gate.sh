@@ -16,7 +16,7 @@ if command -v opa >/dev/null 2>&1; then
   POLICY_INPUT="$(mktemp)"
   trap 'rm -f "$POLICY_INPUT"' EXIT
 
-  python - "$SPEC" "$RELEASE_DIR" "$POLICY_INPUT" <<'PY'
+  python3 - "$SPEC" "$RELEASE_DIR" "$POLICY_INPUT" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -64,5 +64,5 @@ else
 fi
 
 # Keep existing Python gate to produce evidence report under build/releases/<id>/evidence.
-python devops/policy/check_spec_alignment.py --spec "$SPEC" --release-dir "$RELEASE_DIR"
-python devops/policy/check_generated_code_alignment.py --spec "$SPEC" --release-dir "$RELEASE_DIR"
+python3 devops/policy/check_spec_alignment.py --spec "$SPEC" --release-dir "$RELEASE_DIR"
+python3 devops/policy/check_generated_code_alignment.py --spec "$SPEC" --release-dir "$RELEASE_DIR"

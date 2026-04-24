@@ -43,6 +43,12 @@ def expected_contract(spec: dict) -> dict[str, object]:
     baseline_stage_names = [stage["name"] for stage in baseline_stages]
     new_stage = spec["workflow_change"].get("new_stage")
 
+    endpoints: list[str] = []
+    for endpoint in spec.get("api_contract", {}).get("endpoints", []):
+        method = str(endpoint.get("method", "")).upper()
+        path = str(endpoint.get("path", ""))
+        endpoints.append(f"{method} {path}")
+
     return {
         "schema_version": spec["schema_version"],
         "change_id": spec["change_id"],
@@ -51,6 +57,10 @@ def expected_contract(spec: dict) -> dict[str, object]:
         "new_stage_name": new_stage["name"] if new_stage else None,
         "new_stage_threshold": (
             new_stage["required_when"]["amount_gte"] if new_stage else None
+        ),
+        "api_endpoints": endpoints,
+        "reject_endpoint_enabled": any(
+            e == "POST /expenses/{expense_id}/reject" for e in endpoints
         ),
     }
 
@@ -72,8 +82,268 @@ def module_body_from_contract(contract: dict[str, object]) -> str:
         lines.append("NEW_STAGE_NAME = None")
         lines.append("NEW_STAGE_THRESHOLD = None")
 
+    lines.append(f'API_ENDPOINTS = {json.dumps(contract["api_endpoints"])}')
+    lines.append(f'REJECT_ENDPOINT_ENABLED = {json.dumps(contract["reject_endpoint_enabled"])}')
     lines.append("")
     return "\n".join(lines)
+
+
+def app_module_body_from_contract(contract: dict[str, object]) -> str:
+    reject_enabled = "True" if contract["reject_endpoint_enabled"] else "False"
+    return f'''"""Auto-generated service module from spec. Do not edit manually."""
+
+import json
+import os
+import time
+import uuid
+from typing import Any
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from pydantic import BaseModel, Field
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+
+from src.generated.spec_contract import (
+    BASELINE_STAGES,
+    CHANGE_ID,
+    NEW_STAGE_NAME,
+    NEW_STAGE_THRESHOLD,
+    SCHEMA_VERSION,
+    SERVICE,
+)
+
+RULES_PATH = os.getenv("RULES_PATH", "deploy/current/rules.json")
+RELEASE_ID_FILE = os.getenv("RELEASE_ID_FILE", "deploy/current/release_id.txt")
+REJECT_ENDPOINT_ENABLED = {reject_enabled}
+
+app = FastAPI(title="Expense Workflow Service")
+
+expense_submitted_total = Counter("expense_submitted_total", "Submitted expenses")
+approval_step_required_total = Counter(
+    "approval_step_required_total", "Required approvals by step", ["step"]
+)
+approval_step_completed_total = Counter(
+    "approval_step_completed_total", "Completed approvals by step", ["step"]
+)
+expense_approved_total = Counter("expense_approved_total", "Fully approved expenses")
+expense_rejected_total = Counter("expense_rejected_total", "Rejected expenses")
+rejection_missing_reason_total = Counter(
+    "rejection_missing_reason_total", "Rejected requests missing reason fields"
+)
+
+EXPENSES: dict[str, dict[str, Any]] = {{}}
+
+
+def setup_tracing() -> None:
+    if os.getenv("OTEL_SDK_DISABLED", "false").lower() == "true":
+        return
+
+    endpoint = os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "http://otel-collector.monitoring.svc.cluster.local:4318",
+    ).rstrip("/")
+    service_name = os.getenv("OTEL_SERVICE_NAME", SERVICE)
+
+    resource = Resource.create(
+        {{
+            "service.name": service_name,
+            "spec.schema_version": SCHEMA_VERSION,
+            "spec.change_id": CHANGE_ID,
+        }}
+    )
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{{endpoint}}/v1/traces"))
+    )
+    trace.set_tracer_provider(provider)
+    FastAPIInstrumentor.instrument_app(app)
+
+
+class SubmitExpenseRequest(BaseModel):
+    amount: float = Field(gt=0)
+    description: str
+
+
+class ApproveExpenseRequest(BaseModel):
+    role: str
+
+
+class RejectExpenseRequest(BaseModel):
+    role: str
+    reason_code: str | None = None
+    comment: str | None = None
+
+
+def read_release_id() -> str:
+    try:
+        with open(RELEASE_ID_FILE, "r", encoding="utf-8") as f:
+            value = f.read().strip()
+            return value or CHANGE_ID
+    except FileNotFoundError:
+        return CHANGE_ID
+
+
+def load_rules() -> dict[str, Any]:
+    try:
+        with open(RULES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        stages = [{{"name": s, "required_when": {{"amount_gte": 0}}}} for s in BASELINE_STAGES]
+        if NEW_STAGE_NAME is not None:
+            stages.append(
+                {{
+                    "name": NEW_STAGE_NAME,
+                    "required_when": {{
+                        "amount_gte": 0 if NEW_STAGE_THRESHOLD is None else NEW_STAGE_THRESHOLD
+                    }},
+                }}
+            )
+        return {{"workflow": {{"stages": stages}}}}
+
+
+def required_stages_for_amount(amount: float, rules: dict[str, Any]) -> list[str]:
+    stages = []
+    for stage in rules["workflow"]["stages"]:
+        threshold = float(stage["required_when"]["amount_gte"])
+        if amount >= threshold:
+            stages.append(stage["name"])
+    return stages
+
+
+def audit(event: str, payload: dict[str, Any]) -> None:
+    log_line = {{
+        "ts": int(time.time()),
+        "release_id": read_release_id(),
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "event": event,
+        "payload": payload,
+    }}
+    print(json.dumps(log_line), flush=True)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {{
+        "status": "ok",
+        "release_id": read_release_id(),
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+    }}
+
+
+@app.post("/expenses")
+def submit_expense(req: SubmitExpenseRequest) -> dict[str, Any]:
+    rules = load_rules()
+    stages = required_stages_for_amount(req.amount, rules)
+
+    expense_id = str(uuid.uuid4())
+    EXPENSES[expense_id] = {{
+        "id": expense_id,
+        "amount": req.amount,
+        "description": req.description,
+        "required_stages": stages,
+        "approved_stages": [],
+        "status": "PENDING_APPROVAL",
+    }}
+
+    expense_submitted_total.inc()
+    for step in stages:
+        approval_step_required_total.labels(step=step).inc()
+
+    audit(
+        "expense_submitted",
+        {{
+            "expense_id": expense_id,
+            "amount": req.amount,
+            "required_stages": stages,
+        }},
+    )
+
+    return EXPENSES[expense_id]
+
+
+@app.post("/expenses/{{expense_id}}/approve")
+def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, Any]:
+    expense = EXPENSES.get(expense_id)
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    if expense["status"] == "REJECTED":
+        raise HTTPException(status_code=400, detail="Expense already rejected")
+
+    if req.role not in expense["required_stages"]:
+        raise HTTPException(status_code=400, detail=f"Role {{req.role}} is not required")
+
+    if req.role in expense["approved_stages"]:
+        return expense
+
+    expense["approved_stages"].append(req.role)
+    approval_step_completed_total.labels(step=req.role).inc()
+
+    if set(expense["approved_stages"]) == set(expense["required_stages"]):
+        expense["status"] = "APPROVED"
+        expense_approved_total.inc()
+
+    audit(
+        "expense_approved_step",
+        {{
+            "expense_id": expense_id,
+            "approved_role": req.role,
+            "status": expense["status"],
+        }},
+    )
+
+    return expense
+
+
+@app.post("/expenses/{{expense_id}}/reject")
+def reject_expense(expense_id: str, req: RejectExpenseRequest) -> dict[str, Any]:
+    if not REJECT_ENDPOINT_ENABLED:
+        raise HTTPException(status_code=404, detail="Reject endpoint not enabled by spec")
+
+    expense = EXPENSES.get(expense_id)
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    if req.reason_code is None or req.comment is None:
+        rejection_missing_reason_total.inc()
+        raise HTTPException(
+            status_code=400,
+            detail="reason_code and comment are required for rejection",
+        )
+
+    expense["status"] = "REJECTED"
+    expense["rejected_by"] = req.role
+    expense["reason_code"] = req.reason_code
+    expense["comment"] = req.comment
+
+    expense_rejected_total.inc()
+    audit(
+        "expense_rejected",
+        {{
+            "expense_id": expense_id,
+            "rejected_by": req.role,
+            "reason_code": req.reason_code,
+        }},
+    )
+
+    return expense
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+setup_tracing()
+'''
 
 
 def extract_constants(module_source: str) -> dict[str, object]:
@@ -109,6 +379,8 @@ def render_prompt(contract: dict[str, object]) -> str:
         baseline_stages_json=json.dumps(contract["baseline_stage_names"]),
         new_stage_name_json=json.dumps(contract["new_stage_name"]),
         new_stage_threshold_json=json.dumps(contract["new_stage_threshold"]),
+        api_endpoints_json=json.dumps(contract["api_endpoints"]),
+        reject_endpoint_enabled_json=json.dumps(contract["reject_endpoint_enabled"]),
     ).strip()
     return f"{system_prompt}\n\n{user_prompt}"
 
@@ -175,19 +447,25 @@ def main() -> None:
 
     source_root = SERVICE_SOURCE_ROOTS[service]
     generated_dir = source_root / "generated"
-    module_path = generated_dir / "spec_contract.py"
+    contract_path = generated_dir / "spec_contract.py"
     init_path = generated_dir / "__init__.py"
+    app_main_path = source_root / "main.py"
 
     contract = expected_contract(spec)
 
     if args.provider == "ollama":
-        module_source = llm_codegen_with_ollama(contract, args.ollama_model, args.ollama_base_url)
+        contract_source = llm_codegen_with_ollama(contract, args.ollama_model, args.ollama_base_url)
+        app_source = app_module_body_from_contract(contract)
+        app_codegen_provider = "deterministic-template"
     else:
-        module_source = module_body_from_contract(contract)
+        contract_source = module_body_from_contract(contract)
+        app_source = app_module_body_from_contract(contract)
+        app_codegen_provider = "deterministic-template"
 
     generated_dir.mkdir(parents=True, exist_ok=True)
     init_path.write_text("", encoding="utf-8")
-    module_path.write_text(module_source, encoding="utf-8")
+    contract_path.write_text(contract_source, encoding="utf-8")
+    app_main_path.write_text(app_source, encoding="utf-8")
 
     release_id = spec["change_id"]
     evidence_dir = Path(args.output_root) / release_id / "evidence"
@@ -196,16 +474,23 @@ def main() -> None:
     report = {
         "release_id": release_id,
         "service": service,
-        "module_path": str(module_path),
+        "module_path": str(contract_path),
+        "app_module_path": str(app_main_path),
         "provider": args.provider,
+        "app_codegen_provider": app_codegen_provider,
         "ollama_model": args.ollama_model if args.provider == "ollama" else None,
         "constants": contract,
+        "generated_files": [
+            str(contract_path),
+            str(app_main_path),
+        ],
     }
     (evidence_dir / "codegen-report.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8"
     )
 
-    print(f"Generated code artifact: {module_path}")
+    print(f"Generated code artifact: {contract_path}")
+    print(f"Generated app source: {app_main_path}")
     print(f"Codegen provider: {args.provider}")
 
 

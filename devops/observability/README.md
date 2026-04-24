@@ -1,5 +1,6 @@
 # Observability
 
-Runtime verification scripts and telemetry checks.
+Runtime verification scripts, telemetry checks, and local observability stack manifests.
 
-- Minikube monitoring stack setup: `devops/observability/monitoring-minikube.md`
+- Minikube stack setup guide: `devops/observability/monitoring-minikube.md`
+- Minikube manifests: `devops/observability/minikube/`

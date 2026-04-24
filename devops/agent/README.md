@@ -2,7 +2,8 @@
 
 Scripted workflow that reads spec input and generates:
 - release artifacts (`rules.json`, `deploy_manifest.json`, evidence)
-- deterministic source contract (`src/generated/spec_contract.py`)
+- generated source contract (`src/generated/spec_contract.py`)
+- generated service module (`src/main.py`)
 
 Codegen provider options:
 - `deterministic` (default)
@@ -14,3 +15,7 @@ Codegen provider options:
 Prompt files for Ollama codegen:
 - `prompts/codegen_system.txt`
 - `prompts/codegen_user_template.txt`
+
+Notes:
+- In `ollama` mode, contract module generation uses Ollama with strict constant validation.
+- Service module generation uses a deterministic template derived from spec contract.

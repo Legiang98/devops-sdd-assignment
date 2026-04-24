@@ -1,4 +1,0 @@
-# Ingress intentionally disabled for localhost-only Minikube demo.
-# Access the service via:
-# - minikube service expense-workflow -n devops-ssd-assignment --url
-# - kubectl port-forward svc/expense-workflow 8080:80 -n devops-ssd-assignment
