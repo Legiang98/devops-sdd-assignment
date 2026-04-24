@@ -59,14 +59,98 @@ Step-by-step flow:
 6. Verification scripts check that runtime behavior matches the spec.
 7. Rollback is not fully automated yet. We currently use Argo CD to manage rollback manually, so if a new pod crashes, Kubernetes and Argo CD do not automatically replace the current pod.
 
-## Infrastructure
+## Step-by-Step Setup Guide
 
-- Ollama runs locally and provides the LLM endpoint for agent-backed generation. I used `qwen2.5:7b` in Ollama for this PoC.
-- The self-hosted GitHub runner is needed because the workflow depends on local services. I use a self-hosted runner so it can access the Ollama endpoint directly.
-- Minikube is the local Kubernetes cluster for this PoC, used to mirror the production environment as closely as possible. Argo CD handles the GitOps flow as well.
-- The observability stack is intentionally minimal but covers tracing, metrics, and dashboarding for release verification.
+If you want to run this PoC perfectly on your local machine (macOS/Docker recommended), follow these steps in order:
 
-## Project Structure
+### 1. Install & Configure Ollama
+The agent uses local LLM generation to avoid sending proprietary specs to cloud endpoints.
+1. Download and install [Ollama](https://ollama.com/).
+2. Pull the model used in this PoC:
+   ```bash
+   ollama run qwen2.5:7b
+   ```
+3. Keep the Ollama server running. By default, it runs on `http://127.0.0.1:11434`.
+
+### 2. Set up Kubernetes (Minikube)
+We use Minikube with the Docker driver to simulate a real cluster.
+1. Start the cluster with sufficient resources:
+   ```bash
+   minikube start --driver=docker --memory=6144 --cpus=4
+   ```
+2. Enable the ingress addon so we can route internal traffic locally:
+   ```bash
+   minikube addons enable ingress
+   ```
+
+### 3. Install Argo CD & GitOps
+Argo CD acts as our deployment controller, syncing manifests from Git into Minikube.
+1. Install Argo CD into the cluster:
+   ```bash
+   kubectl create namespace argocd
+   kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+   ```
+2. Apply the PoC application definition (this watches the `devops/k8s` directory in this repo):
+   ```bash
+   kubectl apply -f devops/argocd/application.yaml
+   ```
+3. Access Argo CD locally:
+   ```bash
+   kubectl port-forward svc/argocd-server -n argocd 8080:443
+   ```
+   Navigate to `https://localhost:8080`. (Default username: `admin`, get password with `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`)
+
+### 4. Enable Local Network Routing (Crucial for Demo)
+Because Docker isolates the Minikube network on macOS, you must start the Minikube tunnel in a separate background terminal to access services via LoadBalancer/Ingress:
+```bash
+minikube tunnel
+```
+*(Leave this running. It will prompt for your Mac password to bind privileged ports like 80/443 for the Ingress Controller).*
+
+### 5. Setup Self-Hosted GitHub Runner
+Because our GitHub Actions workflow needs to reach the local Ollama instance and deploy to the local Minikube cluster, you must run it on a self-hosted runner.
+1. Go to your GitHub repository -> **Settings** -> **Actions** -> **Runners**.
+2. Click **New self-hosted runner** and select your OS (e.g., macOS).
+3. Follow the provided commands to download, extract, and configure the runner in a local directory.
+4. Run the runner:
+   ```bash
+   ./run.sh
+   ```
+Once connected, pushes to the `dev` branch will trigger the pipeline directly on your machine.
+
+### 6. Set up the Observability Stack (Optional)
+To verify metrics and traces, deploy the OpenTelemetry / Grafana Alloy / Tempo / Grafana stack into the `monitoring` namespace.
+```bash
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+kubectl apply -f devops/monitoring/minikube/namespace.yaml
+```
+
+### 7. Accessing UIs & Backend 
+Since you are developing locally inside Minikube, use `kubectl port-forward` to access various dashboards and the backend service. Keep these running in separate terminal tabs:
+
+**Argo CD (GitOps Dashboard)**
+```bash
+kubectl port-forward svc/argocd-server 8080:443 -n argocd
+```
+- URL: `https://localhost:8080`
+- Username: `admin`
+- Password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`
+
+**Grafana (Observability Dashboard)**
+```bash
+kubectl port-forward svc/grafana 8001:3000 -n monitoring
+```
+- URL: `http://localhost:8001`
+- Username: `admin` 
+- Password: `admin` (default)
+
+**Backend Pod (Expense Workflow Service)**
+```bash
+kubectl port-forward svc/expense-workflow 3001:80 -n devops-ssd-assignment
+```
+- URL: `http://localhost:3001`
+- You can now run `make verify APP_URL=http://localhost:3001` to test the API.
 
 - `applications/expense-workflow-service/`: demo business service, specs, generated code, and tests.
 - `devops/agent/`: spec resolution and generation logic.
