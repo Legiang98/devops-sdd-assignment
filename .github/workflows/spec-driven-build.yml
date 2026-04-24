@@ -43,6 +43,7 @@ jobs:
 
       - name: Resolve spec and release id
         id: resolve
+        shell: bash
         run: |
           set -euo pipefail
 
