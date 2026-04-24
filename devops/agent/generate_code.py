@@ -73,27 +73,41 @@ def module_body_from_contract(contract: dict[str, object]) -> str:
     lines = [
         '"""Auto-generated from spec. Do not edit manually."""',
         "",
-        f'SCHEMA_VERSION = {json.dumps(contract["schema_version"])}',
-        f'CHANGE_ID = {json.dumps(contract["change_id"])}',
-        f'SERVICE = {json.dumps(contract["service"])}',
-        f'BASELINE_STAGES = {json.dumps(contract["baseline_stage_names"])}',
+        f'SCHEMA_VERSION = {repr(contract["schema_version"])}',
+        f'CHANGE_ID = {repr(contract["change_id"])}',
+        f'SERVICE = {repr(contract["service"])}',
+        f'BASELINE_STAGES = {repr(contract["baseline_stage_names"])}',
     ]
 
     if contract["new_stage_name"] is not None:
-        lines.append(f'NEW_STAGE_NAME = {json.dumps(contract["new_stage_name"])}')
-        lines.append(f'NEW_STAGE_THRESHOLD = {json.dumps(contract["new_stage_threshold"])}')
+        lines.append(f'NEW_STAGE_NAME = {repr(contract["new_stage_name"])}')
+        lines.append(f'NEW_STAGE_THRESHOLD = {repr(contract["new_stage_threshold"])}')
     else:
         lines.append("NEW_STAGE_NAME = None")
         lines.append("NEW_STAGE_THRESHOLD = None")
 
-    lines.append(f'API_ENDPOINTS = {json.dumps(contract["api_endpoints"])}')
-    lines.append(f'REJECT_ENDPOINT_ENABLED = {json.dumps(contract["reject_endpoint_enabled"])}')
+    lines.append(f'API_ENDPOINTS = {repr(contract["api_endpoints"])}')
+    lines.append(f'REJECT_ENDPOINT_ENABLED = {repr(contract["reject_endpoint_enabled"])}')
     lines.append("")
     return "\n".join(lines)
 
 
 def app_module_body_from_contract(contract: dict[str, object]) -> str:
+    expense_lookup_enabled = "GET /expenses/{expense_id}" in contract["api_endpoints"]
     reject_enabled = "True" if contract["reject_endpoint_enabled"] else "False"
+    lookup_route = ""
+    if expense_lookup_enabled:
+        lookup_route = '''
+
+
+@app.get("/expenses/{expense_id}")
+def get_expense(expense_id: str) -> dict[str, Any]:
+    expense = EXPENSES.get(expense_id)
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    return expense
+'''
     reject_route = ""
     if contract["reject_endpoint_enabled"]:
         reject_route = '''
@@ -344,6 +358,8 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
 
     return expense
 
+
+{lookup_route}
 
 {reject_route}
 

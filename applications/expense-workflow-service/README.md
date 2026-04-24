@@ -1,7 +1,7 @@
 # Expense Workflow Service
 
-Business application slice used by the PoC.
+Business application slice generated from spec.
 
-- `specs/`: versioned change specifications (input trigger)
+- `specs/`: versioned change specifications
 - `src/`: service implementation
 - `tests/`: service tests

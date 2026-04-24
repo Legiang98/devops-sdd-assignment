@@ -213,6 +213,18 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
 
 
 
+
+@app.get("/expenses/{expense_id}")
+def get_expense(expense_id: str) -> dict[str, Any]:
+    expense = EXPENSES.get(expense_id)
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    return expense
+
+
+
+
 @app.get("/metrics")
 def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

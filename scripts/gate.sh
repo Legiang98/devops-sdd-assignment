@@ -21,22 +21,23 @@ import json
 import sys
 from pathlib import Path
 
-import yaml
+sys.path.insert(0, str(Path.cwd()))
+
+from devops.specs import load_resolved_spec
 
 spec_path = Path(sys.argv[1])
 release_dir = Path(sys.argv[2])
 output_path = Path(sys.argv[3])
 
 payload = {
-    "spec": yaml.safe_load(spec_path.read_text(encoding="utf-8")),
+    "spec": load_resolved_spec(spec_path),
     "generated": {
-        "rules": json.loads((release_dir / "rules.json").read_text(encoding="utf-8")),
-        "deploy_manifest": json.loads(
-            (release_dir / "deploy_manifest.json").read_text(encoding="utf-8")
-        ),
-        "codegen_report": json.loads(
-            (release_dir / "evidence" / "codegen-report.json").read_text(encoding="utf-8")
-        ),
+        name: json.loads(path.read_text(encoding="utf-8"))
+        for name, path in {
+            "rules": release_dir / "rules.json",
+            "deploy_manifest": release_dir / "deploy_manifest.json",
+            "codegen_report": release_dir / "evidence" / "codegen-report.json",
+        }.items()
     },
 }
 output_path.write_text(json.dumps(payload), encoding="utf-8")
