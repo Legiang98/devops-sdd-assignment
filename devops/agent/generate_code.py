@@ -100,7 +100,6 @@ def module_body_from_contract(contract: dict[str, object]) -> str:
 
 def app_module_body_from_contract(contract: dict[str, object]) -> str:
     expense_lookup_enabled = "GET /expenses/{expense_id}" in contract["api_endpoints"]
-    expense_status_enabled = "GET /expenses/{expense_id}/status" in contract["api_endpoints"]
     reject_enabled = "True" if contract["reject_endpoint_enabled"] else "False"
     lookup_route = ""
     if expense_lookup_enabled:
@@ -114,24 +113,6 @@ def get_expense(expense_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Expense not found")
 
     return expense
-'''
-    status_route = ""
-    if expense_status_enabled:
-        status_route = '''
-
-
-@app.get("/expenses/{expense_id}/status")
-def get_expense_status(expense_id: str) -> dict[str, Any]:
-    expense = EXPENSES.get(expense_id)
-    if not expense:
-        raise HTTPException(status_code=404, detail="Expense not found")
-
-    return {
-        "id": expense["id"],
-        "status": expense["status"],
-        "required_stages": expense["required_stages"],
-        "approved_stages": expense["approved_stages"],
-    }
 '''
     reject_route = ""
     if contract["reject_endpoint_enabled"]:
@@ -385,8 +366,6 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
 
 
 {lookup_route}
-
-{status_route}
 
 {reject_route}
 
