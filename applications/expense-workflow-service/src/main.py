@@ -82,12 +82,6 @@ class ApproveExpenseRequest(BaseModel):
     role: str
 
 
-class RejectExpenseRequest(BaseModel):
-    role: str
-    reason_code: str | None = None
-    comment: str | None = None
-
-
 def read_release_id() -> str:
     try:
         with open(RELEASE_ID_FILE, "r", encoding="utf-8") as f:
