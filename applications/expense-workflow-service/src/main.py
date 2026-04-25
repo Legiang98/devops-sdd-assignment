@@ -149,12 +149,12 @@ def health() -> dict[str, str]:
 @app.post("/expenses")
 def submit_expense(req: SubmitExpenseRequest) -> dict[str, Any]:
     rules = load_rules()
-    stages = required_stages_for_amount(req.amount, rules)
+    stages = required_stages_for_amount(float(req.amount), rules)
 
     expense_id = str(uuid.uuid4())
     EXPENSES[expense_id] = {
         "id": expense_id,
-        "amount": req.amount,
+        "amount": float(req.amount),
         "description": req.description,
         "required_stages": stages,
         "approved_stages": [],
@@ -169,8 +169,8 @@ def submit_expense(req: SubmitExpenseRequest) -> dict[str, Any]:
         "expense_submitted",
         {
             "expense_id": expense_id,
-            "amount": req.amount,
-            "required_stages": stages,
+            "amount": str(req.amount),
+            "required_stages": json.dumps(stages),
         },
     )
 
@@ -226,7 +226,7 @@ def get_expense_summary(expense_id: str) -> dict[str, Any]:
 
     return {
         "id": expense["id"],
-        "amount": expense["amount"],
+        "amount": str(expense["amount"]),
         "description": expense["description"],
         "status": expense["status"],
     }
