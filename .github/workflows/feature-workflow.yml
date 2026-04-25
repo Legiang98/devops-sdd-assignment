@@ -147,6 +147,7 @@ jobs:
           RELEASE_ID: ${{ needs.scan_spec.outputs.release_id }}
           SPEC_FILE: ${{ needs.scan_spec.outputs.spec_file }}
         with:
+          github-token: ${{ secrets.FINE_GRAINED_PAT }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
