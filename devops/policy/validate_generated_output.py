@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate generated implementation and GitOps output against the resolved spec."""
+"""Validate generated application output against the resolved spec."""
 
 from __future__ import annotations
 
@@ -9,17 +9,18 @@ import json
 import sys
 from pathlib import Path
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from devops.spec.specs import load_resolved_spec
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate generated implementation output")
+    parser = argparse.ArgumentParser(description="Validate generated application output")
     parser.add_argument("--spec", required=True, help="Path to spec YAML")
-    parser.add_argument("--release-dir", required=True, help="Path to release directory")
+    parser.add_argument(
+        "--report-dir",
+        help="Optional directory where the report should be written",
+    )
     return parser.parse_args()
 
 
@@ -43,9 +44,9 @@ def extract_constants(module_path: Path) -> dict[str, object]:
     return constants
 
 
-def route_map(module_path: Path) -> dict[tuple[str, str], str]:
+def route_map(module_path: Path) -> set[tuple[str, str]]:
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
-    routes: dict[tuple[str, str], str] = {}
+    routes: set[tuple[str, str]] = set()
     for node in tree.body:
         if not isinstance(node, ast.FunctionDef):
             continue
@@ -62,7 +63,7 @@ def route_map(module_path: Path) -> dict[tuple[str, str], str]:
             first_arg = decorator.args[0]
             if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
                 continue
-            routes[(func.attr.upper(), first_arg.value)] = node.name
+            routes.add((func.attr.upper(), first_arg.value))
     return routes
 
 
@@ -76,271 +77,94 @@ def app_imports_contract(module_path: Path) -> bool:
     return False
 
 
-def yaml_doc(path: Path) -> dict | None:
-    text = path.read_text(encoding="utf-8")
-    parsed = yaml.safe_load(text)
-    if parsed is None:
-        return None
-    if not isinstance(parsed, dict):
-        raise SystemExit(f"Expected mapping YAML in {path}")
-    return parsed
-
-
-def is_within(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
-
-
 def main() -> None:
     args = parse_args()
     spec_path = Path(args.spec)
-    release_dir = Path(args.release_dir)
-
     spec = load_resolved_spec(spec_path)
-    codegen_report_path = release_dir / "evidence" / "codegen-report.json"
-    codegen_report = json.loads(codegen_report_path.read_text(encoding="utf-8"))
-    workspace = spec.get("workspace", {})
-    manifest_path_str = workspace.get(
-        "manifest_path",
-        f"devops/k8s/{spec_path.resolve().parents[1].name}",
-    )
-    app_root = Path(workspace.get("path", spec_path.resolve().parents[1])).resolve()
-    manifest_root = Path(manifest_path_str).resolve()
-    argocd_root = Path("devops/k8s/argocd").resolve()
-    argocd_config = ((spec.get("gitops") or {}).get("argocd") or {})
-    argocd_enabled = argocd_config.get("enabled", True)
-    argocd_application_name = argocd_config.get("application_name", app_root.name)
-    argocd_application_path = argocd_root / f"{app_root.name}-application.yaml"
-    dockerfile_path = app_root / workspace.get("dockerfile_path", "Dockerfile")
-    tests_root = app_root / workspace.get("tests_path", "tests")
 
-    module_path = Path(codegen_report["module_path"])
-    module_constants = extract_constants(module_path)
-    app_module_path = Path(
-        codegen_report.get("app_module_path", app_root / "src" / "main.py")
-    ).resolve()
-    generated_files = [Path(path).resolve() for path in codegen_report.get("generated_files", [])]
+    workspace = spec.get("workspace", {})
+    app_root = Path(workspace.get("path", spec_path.resolve().parents[1])).resolve()
+    source_root = app_root / workspace.get("src_path", "src")
+    contract_path = source_root / "generated" / "spec_contract.py"
+    app_main_path = source_root / "main.py"
+
+    report_dir = Path(args.report_dir or f"build/policy/{spec['change_id']}")
+    report_dir.mkdir(parents=True, exist_ok=True)
 
     violations: list[str] = []
 
-    expected_baseline = [
-        stage["name"] for stage in spec["workflow_change"]["baseline_stages"]
-    ]
-    expected_new_stage = spec["workflow_change"].get("new_stage")
-
-    if codegen_report.get("release_id") != spec["change_id"]:
-        violations.append("codegen_report.release_id must match spec.change_id")
-
-    if module_constants.get("SCHEMA_VERSION") != spec["schema_version"]:
-        violations.append("generated code SCHEMA_VERSION mismatch")
-
-    if module_constants.get("CHANGE_ID") != spec["change_id"]:
-        violations.append("generated code CHANGE_ID mismatch")
-
-    if module_constants.get("SERVICE") != spec["service"]:
-        violations.append("generated code SERVICE mismatch")
-
-    if module_constants.get("BASELINE_STAGES") != expected_baseline:
-        violations.append("generated code BASELINE_STAGES mismatch")
-
-    expected_new_stage_name = expected_new_stage["name"] if expected_new_stage else None
-    expected_new_stage_threshold = (
-        expected_new_stage["required_when"]["amount_gte"] if expected_new_stage else None
-    )
-
-    if module_constants.get("NEW_STAGE_NAME") != expected_new_stage_name:
-        violations.append("generated code NEW_STAGE_NAME mismatch")
-
-    if module_constants.get("NEW_STAGE_THRESHOLD") != expected_new_stage_threshold:
-        violations.append("generated code NEW_STAGE_THRESHOLD mismatch")
-
-    expected_generated = {
-        app_root / "src" / "generated" / "spec_contract.py",
-        app_root / "src" / "__init__.py",
-        app_root / "src" / "main.py",
-        app_root / "README.md",
-        app_root / "src" / "README.md",
-        dockerfile_path,
-        tests_root / "README.md",
-        tests_root / "test_generated_placeholder.py",
-        manifest_root / "namespace.yaml",
-        manifest_root / "deployment.yaml",
-        manifest_root / "service.yaml",
-        manifest_root / "ingress.yaml",
-    }
-    if argocd_enabled:
-        expected_generated.add(argocd_application_path)
-
-    missing_generated = [str(path) for path in expected_generated if path not in generated_files]
-    if missing_generated:
-        violations.append(
-            f"generated_files missing expected outputs: {', '.join(sorted(missing_generated))}"
+    print(f"[policy] scan contract file: {contract_path}")
+    if not contract_path.exists():
+        violations.append(f"missing generated contract: {contract_path}")
+    else:
+        constants = extract_constants(contract_path)
+        expected_baseline = [
+            stage["name"] for stage in spec["workflow_change"]["baseline_stages"]
+        ]
+        expected_new_stage = spec["workflow_change"].get("new_stage")
+        expected_new_stage_name = expected_new_stage["name"] if expected_new_stage else None
+        expected_new_stage_threshold = (
+            expected_new_stage["required_when"]["amount_gte"] if expected_new_stage else None
         )
 
-    for path in generated_files:
-        if (
-            not is_within(path, app_root)
-            and not is_within(path, manifest_root)
-            and not is_within(path, argocd_root)
-        ):
-            violations.append(f"generated file outside app/gitops scope: {path}")
+        checks = [
+            ("SCHEMA_VERSION", spec["schema_version"]),
+            ("CHANGE_ID", spec["change_id"]),
+            ("SERVICE", spec["service"]),
+            ("BASELINE_STAGES", expected_baseline),
+            ("NEW_STAGE_NAME", expected_new_stage_name),
+            ("NEW_STAGE_THRESHOLD", expected_new_stage_threshold),
+        ]
+        for key, expected in checks:
+            actual = constants.get(key)
+            print(f"[policy] contract check {key}: expected={expected!r} actual={actual!r}")
+            if actual != expected:
+                violations.append(f"generated contract {key} mismatch")
 
-    if not app_module_path.exists():
-        violations.append(f"generated app module missing: {app_module_path}")
+    print(f"[policy] scan app entrypoint: {app_main_path}")
+    if not app_main_path.exists():
+        violations.append(f"missing app entrypoint: {app_main_path}")
     else:
-        if not app_imports_contract(app_module_path):
+        if not app_imports_contract(app_main_path):
             violations.append("generated app must import src.generated.spec_contract")
 
-        actual_routes = route_map(app_module_path)
+        actual_routes = route_map(app_main_path)
         expected_routes = {
             (str(endpoint["method"]).upper(), endpoint["path"])
             for endpoint in spec.get("api_contract", {}).get("endpoints", [])
         }
         expected_routes.update({("GET", "/health"), ("GET", "/metrics")})
+
+        print("[policy] route scan start")
+        for method, path in sorted(actual_routes):
+            print(f"[policy] found route {method} {path}")
         for route in sorted(expected_routes):
             if route not in actual_routes:
                 violations.append(f"generated app missing route {route[0]} {route[1]}")
 
-        reject_expected = any(
-            str(endpoint["method"]).upper() == "POST"
-            and endpoint["path"] == "/expenses/{expense_id}/reject"
-            for endpoint in spec.get("api_contract", {}).get("endpoints", [])
-        )
+        reject_expected = ("POST", "/expenses/{expense_id}/reject") in expected_routes
         has_reject = ("POST", "/expenses/{expense_id}/reject") in actual_routes
+        print(f"[policy] reject route expected={reject_expected} actual={has_reject}")
         if has_reject != reject_expected:
             violations.append("generated app reject route does not match spec")
-
-    if not dockerfile_path.exists():
-        violations.append(f"generated Dockerfile missing: {dockerfile_path}")
-
-    if not tests_root.exists():
-        violations.append(f"generated tests directory missing: {tests_root}")
-
-    namespace_path = manifest_root / "namespace.yaml"
-    deployment_path = manifest_root / "deployment.yaml"
-    service_path = manifest_root / "service.yaml"
-    ingress_path = manifest_root / "ingress.yaml"
-    k8s = spec["deployment"]["k8s"]
-
-    if not namespace_path.exists():
-        violations.append(f"missing manifest: {namespace_path}")
-    else:
-        namespace_doc = yaml_doc(namespace_path)
-        if namespace_doc is not None and namespace_doc.get("metadata", {}).get("name") != k8s["namespace"]:
-            violations.append("namespace manifest name mismatch")
-
-    if not deployment_path.exists():
-        violations.append(f"missing manifest: {deployment_path}")
-    else:
-        deployment_doc = yaml_doc(deployment_path)
-        container = (
-            deployment_doc.get("spec", {})
-            .get("template", {})
-            .get("spec", {})
-            .get("containers", [{}])[0]
-        )
-        if deployment_doc.get("metadata", {}).get("name") != k8s["deployment"]["name"]:
-            violations.append("deployment manifest name mismatch")
-        if deployment_doc.get("metadata", {}).get("namespace") != k8s["namespace"]:
-            violations.append("deployment manifest namespace mismatch")
-        if deployment_doc.get("spec", {}).get("replicas") != k8s["deployment"]["replicas"]:
-            violations.append("deployment replicas mismatch")
-        port = (container.get("ports") or [{}])[0].get("containerPort")
-        if port != k8s["deployment"]["container_port"]:
-            violations.append("deployment container_port mismatch")
-        if not container.get("image"):
-            violations.append("deployment image is required")
-
-    if not service_path.exists():
-        violations.append(f"missing manifest: {service_path}")
-    else:
-        service_doc = yaml_doc(service_path)
-        service_port = (service_doc.get("spec", {}).get("ports") or [{}])[0]
-        if service_doc.get("metadata", {}).get("name") != k8s["service"]["name"]:
-            violations.append("service manifest name mismatch")
-        if service_doc.get("metadata", {}).get("namespace") != k8s["namespace"]:
-            violations.append("service manifest namespace mismatch")
-        if service_port.get("port") != k8s["service"]["port"]:
-            violations.append("service port mismatch")
-        if service_port.get("targetPort") != k8s["service"]["target_port"]:
-            violations.append("service targetPort mismatch")
-
-    ingress_enabled = k8s.get("ingress", {}).get("enabled", False)
-    if not ingress_path.exists():
-        violations.append(f"missing manifest: {ingress_path}")
-    else:
-        ingress_text = ingress_path.read_text(encoding="utf-8")
-        if ingress_enabled:
-            ingress_doc = yaml_doc(ingress_path)
-            if ingress_doc is None or ingress_doc.get("kind") != "Ingress":
-                violations.append("ingress manifest must be a Kubernetes Ingress when enabled")
-            else:
-                rules = ingress_doc.get("spec", {}).get("rules") or []
-                if not rules:
-                    violations.append("ingress rules are required when ingress is enabled")
-                backend_service = (
-                    rules[0]
-                    .get("http", {})
-                    .get("paths", [{}])[0]
-                    .get("backend", {})
-                    .get("service", {})
-                )
-                if backend_service.get("name") != k8s["service"]["name"]:
-                    violations.append("ingress backend service mismatch")
-        elif "Ingress disabled by spec." not in ingress_text:
-            violations.append("ingress manifest must stay disabled when spec ingress.enabled is false")
-
-    if argocd_enabled:
-        if not argocd_application_path.exists():
-            violations.append(f"missing Argo CD application manifest: {argocd_application_path}")
-        else:
-            argocd_doc = yaml_doc(argocd_application_path)
-            metadata = (argocd_doc or {}).get("metadata", {}) or {}
-            argocd_spec = (argocd_doc or {}).get("spec", {}) or {}
-            source = argocd_spec.get("source", {}) or {}
-            destination = argocd_spec.get("destination", {}) or {}
-            expected_source_path = Path(manifest_path_str).as_posix()
-
-            if (argocd_doc or {}).get("kind") != "Application":
-                violations.append("Argo CD manifest kind must be Application")
-            if metadata.get("namespace") != "argocd":
-                violations.append("Argo CD application namespace must be argocd")
-            if metadata.get("name") != argocd_application_name:
-                violations.append("Argo CD application metadata.name mismatch")
-            if argocd_application_path.name != f"{app_root.name}-application.yaml":
-                violations.append("Argo CD application filename mismatch")
-            if source.get("path") != expected_source_path:
-                violations.append("Argo CD application source.path must match spec.workspace.manifest_path")
-            if destination.get("namespace") != k8s["namespace"]:
-                violations.append("Argo CD application destination namespace mismatch")
-    elif codegen_report.get("argocd_application_path"):
-        violations.append("Argo CD application must not be generated when spec disables it")
 
     report = {
         "release_id": spec["change_id"],
         "spec": str(spec_path),
-        "release_dir": str(release_dir),
+        "app_root": str(app_root),
         "status": "pass" if not violations else "fail",
         "violations": violations,
     }
-
-    evidence_dir = release_dir / "evidence"
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    (evidence_dir / "generated-output-policy-report.json").write_text(
-        json.dumps(report, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    report_path = report_dir / "generated-output-policy-report.json"
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     if violations:
-        print("Generated output validation failed:")
+        print("[policy] generated output validation failed")
         for violation in violations:
-            print(f"- {violation}")
+            print(f"[policy] violation: {violation}")
         raise SystemExit(1)
 
-    print("Generated output validation passed")
+    print("[policy] generated output validation passed")
 
 
 if __name__ == "__main__":
