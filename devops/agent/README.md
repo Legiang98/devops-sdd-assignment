@@ -12,12 +12,11 @@ Codegen provider options:
   - `OLLAMA_MODEL=qwen2.5:7b`
   - `OLLAMA_BASE_URL=http://127.0.0.1:11434`
 
-Prompt files for Ollama codegen:
-- `prompts/codegen_system.txt`
-- `prompts/codegen_user_template.txt`
-- `prompts/app_gitops_codegen_system.txt`
-- `prompts/app_gitops_codegen_user_template.txt`
+Prompt reference:
+- `prompts/reference.txt`
 
 Notes:
 - In `ollama` mode, contract module generation uses Ollama with strict constant validation.
 - Full app source and matching GitOps manifests are generated from spec within the target app scope.
+- The feat-branch workflow validates specs first, then runs deterministic generation and uploads the generated outputs as CI artifacts.
+- Runtime prompts are assembled directly in `generate_code.py`; the prompt file is kept only as a reference for the next rebuild.

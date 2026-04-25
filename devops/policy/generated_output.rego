@@ -1,4 +1,4 @@
-package policy.spec_alignment
+package policy.generated_output
 
 import future.keywords.contains
 import future.keywords.if

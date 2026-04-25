@@ -17,7 +17,7 @@ gate:
 pipeline: generate gate
 
 demo:
-	./devops/scripts/demo_gate_failure.sh
+	./scripts/demo_gate_failure.sh
 
 serve:
 	PYTHONPATH=applications/expense-workflow-service python3 -m uvicorn src.main:app --host 0.0.0.0 --port 8000
@@ -26,4 +26,4 @@ verify:
 	python3 devops/observability/verify_behavior.py --base-url "$(APP_URL)"
 
 rollback:
-	./devops/scripts/rollback.sh BASELINE
+	./scripts/rollback.sh BASELINE

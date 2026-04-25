@@ -1,4 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+"""Validate generated implementation and GitOps output against the resolved spec."""
+
+from __future__ import annotations
+
 import argparse
 import ast
 import json
@@ -9,11 +13,11 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from devops.specs import load_resolved_spec
+from devops.spec.specs import load_resolved_spec
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Policy gate: generated code alignment")
+    parser = argparse.ArgumentParser(description="Validate generated implementation output")
     parser.add_argument("--spec", required=True, help="Path to spec YAML")
     parser.add_argument("--release-dir", required=True, help="Path to release directory")
     return parser.parse_args()
@@ -99,7 +103,10 @@ def main() -> None:
     codegen_report_path = release_dir / "evidence" / "codegen-report.json"
     codegen_report = json.loads(codegen_report_path.read_text(encoding="utf-8"))
     workspace = spec.get("workspace", {})
-    manifest_path_str = workspace.get("manifest_path", f"devops/k8s/{spec_path.resolve().parents[1].name}")
+    manifest_path_str = workspace.get(
+        "manifest_path",
+        f"devops/k8s/{spec_path.resolve().parents[1].name}",
+    )
     app_root = Path(workspace.get("path", spec_path.resolve().parents[1])).resolve()
     manifest_root = Path(manifest_path_str).resolve()
     argocd_root = Path("devops/k8s/argocd").resolve()
@@ -115,7 +122,7 @@ def main() -> None:
     app_module_path = Path(
         codegen_report.get("app_module_path", app_root / "src" / "main.py")
     ).resolve()
-    generated_files = [Path(p).resolve() for p in codegen_report.get("generated_files", [])]
+    generated_files = [Path(path).resolve() for path in codegen_report.get("generated_files", [])]
 
     violations: list[str] = []
 
@@ -166,6 +173,7 @@ def main() -> None:
     }
     if argocd_enabled:
         expected_generated.add(argocd_application_path)
+
     missing_generated = [str(path) for path in expected_generated if path not in generated_files]
     if missing_generated:
         violations.append(
@@ -196,12 +204,12 @@ def main() -> None:
             if route not in actual_routes:
                 violations.append(f"generated app missing route {route[0]} {route[1]}")
 
-        has_reject = ("POST", "/expenses/{expense_id}/reject") in actual_routes
         reject_expected = any(
             str(endpoint["method"]).upper() == "POST"
             and endpoint["path"] == "/expenses/{expense_id}/reject"
             for endpoint in spec.get("api_contract", {}).get("endpoints", [])
         )
+        has_reject = ("POST", "/expenses/{expense_id}/reject") in actual_routes
         if has_reject != reject_expected:
             violations.append("generated app reject route does not match spec")
 
@@ -282,9 +290,8 @@ def main() -> None:
                 )
                 if backend_service.get("name") != k8s["service"]["name"]:
                     violations.append("ingress backend service mismatch")
-        else:
-            if "Ingress disabled by spec." not in ingress_text:
-                violations.append("ingress manifest must stay disabled when spec ingress.enabled is false")
+        elif "Ingress disabled by spec." not in ingress_text:
+            violations.append("ingress manifest must stay disabled when spec ingress.enabled is false")
 
     if argocd_enabled:
         if not argocd_application_path.exists():
@@ -322,17 +329,18 @@ def main() -> None:
 
     evidence_dir = release_dir / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    (evidence_dir / "code-policy-report.json").write_text(
-        json.dumps(report, indent=2) + "\n", encoding="utf-8"
+    (evidence_dir / "generated-output-policy-report.json").write_text(
+        json.dumps(report, indent=2) + "\n",
+        encoding="utf-8",
     )
 
     if violations:
-        print("Generated code policy failed:")
-        for v in violations:
-            print(f"- {v}")
+        print("Generated output validation failed:")
+        for violation in violations:
+            print(f"- {violation}")
         raise SystemExit(1)
 
-    print("Generated code policy passed")
+    print("Generated output validation passed")
 
 
 if __name__ == "__main__":

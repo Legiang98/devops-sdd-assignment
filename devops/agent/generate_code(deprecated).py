@@ -38,51 +38,83 @@ Constraints:
 - No functions/classes
 - Only assignments for the listed constants"""
 
-APP_GITOPS_SYSTEM_PROMPT = """Generate feature code from a deterministic contract.
+APP_GITOPS_SYSTEM_PROMPT = """You are a spec-driven code generation worker.
+You update exactly one application and its matching GitOps manifests.
 
-Output one JSON object only.
-No markdown. No explanation. No extra keys.
-
-Required shape:
-{
-  "src_files": {
-    "main.py": "...",
-    "features/<feature>.py": "..."
-  }
-}
+Output only valid JSON.
+Do not output markdown.
+Do not include explanations.
+Do not include any keys other than the ones requested.
 
 Rules:
-- Update only files under src/.
-- Never write to src/generated/.
-- main.py is required and should stay thin.
-- Put feature logic in separate src files when useful.
-- main.py should compose/import feature modules.
-- Keep code runnable.
-- Keep /health and /metrics.
-- Implement only routes present in the contract.
-- If reject is disabled, do not add the reject route.
-- If reject is enabled, require reason_code and comment."""
+- You may modify only the target application file and target GitOps files requested by the user prompt.
+- The GitOps folder name matches the application folder name.
+- Keep the implementation runnable.
+- Keep output deterministic and concise.
+- Preserve the required constants and behaviors from the spec.
+- Do not invent extra API routes.
+- When `reject_endpoint_enabled` is false, do not include `/expenses/{expense_id}/reject`.
+- When `reject_endpoint_enabled` is true, include `/expenses/{expense_id}/reject` and require `reason_code` and `comment`.
+- Keep `/health` and `/metrics`."""
 
-APP_GITOPS_USER_TEMPLATE = """Target:
+APP_GITOPS_USER_TEMPLATE = """Generate a JSON object with exactly these keys:
+- `app_main_py`
+- `k8s_namespace_yaml`
+- `k8s_deployment_yaml`
+- `k8s_service_yaml`
+- `k8s_ingress_yaml`
+
+Target application:
 - app_path: {app_path}
+- gitops_path: {gitops_path}
 
-Contract:
-- service: {service_json}
+Spec metadata:
+- schema_version: {schema_version_json}
 - change_id: {change_id_json}
+- service: {service_json}
 - baseline_stages: {baseline_stages_json}
 - new_stage_name: {new_stage_name_json}
 - new_stage_threshold: {new_stage_threshold_json}
 - api_endpoints: {api_endpoints_json}
 - reject_endpoint_enabled: {reject_endpoint_enabled_json}
+- deployment_environment: {deployment_environment_json}
+- k8s_namespace: {k8s_namespace_json}
+- k8s_deployment_name: {k8s_deployment_name_json}
+- k8s_replicas: {k8s_replicas_json}
+- k8s_container_port: {k8s_container_port_json}
+- k8s_service_name: {k8s_service_name_json}
+- k8s_service_port: {k8s_service_port_json}
+- k8s_service_target_port: {k8s_service_target_port_json}
+- k8s_ingress_enabled: {k8s_ingress_enabled_json}
 
-Current src files:
-{current_src_files_json}
+Current file contents:
+- current_app_main_py:
+{current_app_main_py_json}
+- current_k8s_namespace_yaml:
+{current_k8s_namespace_yaml_json}
+- current_k8s_deployment_yaml:
+{current_k8s_deployment_yaml_json}
+- current_k8s_service_yaml:
+{current_k8s_service_yaml_json}
+- current_k8s_ingress_yaml:
+{current_k8s_ingress_yaml_json}
 
-Requirements:
-- src_files["main.py"] must import from src.generated.spec_contract
-- src_files["main.py"] must also keep GET /health and GET /metrics
-- routes must match exactly: {api_endpoints_json}
-- all JSON values must be strings"""
+Required outcomes:
+- `app_main_py` must be a complete FastAPI application module.
+- `app_main_py` must keep the generated spec constants import from `src.generated.spec_contract`.
+- `app_main_py` must implement exactly these business endpoints from the spec, plus `GET /health` and `GET /metrics`, and no extra API routes:
+  {api_endpoints_json}
+- If `reject_endpoint_enabled` is true, include rejection handling with `reason_code` and `comment`.
+- If `reject_endpoint_enabled` is false, do not include the `/expenses/{{expense_id}}/reject` route.
+- `k8s_namespace_yaml`, `k8s_deployment_yaml`, `k8s_service_yaml`, and `k8s_ingress_yaml` must be complete Kubernetes manifests.
+- `k8s_deployment_yaml` must set the container image to `{image_repository_placeholder}:latest`.
+- `k8s_ingress_yaml` must target the application service and use host `{ingress_host}`.
+- Keep current file structure and names unless the spec requires a change.
+
+Constraints:
+- JSON values must all be strings.
+- Escape newlines correctly.
+- Do not wrap the JSON in markdown fences."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -971,8 +1003,14 @@ def render_app_gitops_prompt(
     gitops_path: Path,
     current_files: dict[str, str],
 ) -> str:
+    k8s = spec["deployment"]["k8s"]
+    deployment = k8s["deployment"]
+    service = k8s["service"]
+    app_dir_name = app_path.name
     user_prompt = APP_GITOPS_USER_TEMPLATE.format(
         app_path=str(app_path),
+        gitops_path=str(gitops_path),
+        schema_version_json=json.dumps(contract["schema_version"]),
         change_id_json=json.dumps(contract["change_id"]),
         service_json=json.dumps(contract["service"]),
         baseline_stages_json=json.dumps(contract["baseline_stage_names"]),
@@ -980,7 +1018,22 @@ def render_app_gitops_prompt(
         new_stage_threshold_json=json.dumps(contract["new_stage_threshold"]),
         api_endpoints_json=json.dumps(contract["api_endpoints"]),
         reject_endpoint_enabled_json=json.dumps(contract["reject_endpoint_enabled"]),
-        current_src_files_json=json.dumps(current_files, indent=2, sort_keys=True),
+        deployment_environment_json=json.dumps(spec["deployment"]["environment"]),
+        k8s_namespace_json=json.dumps(k8s["namespace"]),
+        k8s_deployment_name_json=json.dumps(deployment["name"]),
+        k8s_replicas_json=json.dumps(deployment["replicas"]),
+        k8s_container_port_json=json.dumps(deployment["container_port"]),
+        k8s_service_name_json=json.dumps(service["name"]),
+        k8s_service_port_json=json.dumps(service["port"]),
+        k8s_service_target_port_json=json.dumps(service["target_port"]),
+        k8s_ingress_enabled_json=json.dumps(k8s.get("ingress", {}).get("enabled", False)),
+        current_app_main_py_json=json.dumps(current_files["app_main_py"]),
+        current_k8s_namespace_yaml_json=json.dumps(current_files["k8s_namespace_yaml"]),
+        current_k8s_deployment_yaml_json=json.dumps(current_files["k8s_deployment_yaml"]),
+        current_k8s_service_yaml_json=json.dumps(current_files["k8s_service_yaml"]),
+        current_k8s_ingress_yaml_json=json.dumps(current_files["k8s_ingress_yaml"]),
+        image_repository_placeholder=app_dir_name,
+        ingress_host=ingress_host_for_app(app_dir_name),
     ).strip()
     return f"{APP_GITOPS_SYSTEM_PROMPT}\n\n{user_prompt}"
 
@@ -1091,40 +1144,19 @@ def llm_app_gitops_bundle_with_ollama(
     )
     bundle = parse_json_object(response_text)
 
-    expected_keys = {"src_files"}
+    expected_keys = {
+        "app_main_py",
+        "k8s_namespace_yaml",
+        "k8s_deployment_yaml",
+        "k8s_service_yaml",
+        "k8s_ingress_yaml",
+    }
     if set(bundle) != expected_keys:
         raise SystemExit(
             f"Ollama bundle keys mismatch: expected {sorted(expected_keys)}, got {sorted(bundle)}"
         )
 
-    src_files = bundle.get("src_files")
-    if not isinstance(src_files, dict):
-        raise SystemExit("Ollama src_files must be a JSON object")
-    if "main.py" not in src_files:
-        raise SystemExit("Ollama src_files must include main.py")
-    for rel_path, content in src_files.items():
-        if not isinstance(rel_path, str) or not isinstance(content, str):
-            raise SystemExit("Ollama src_files keys and values must be strings")
-        normalized = Path(rel_path)
-        if normalized.is_absolute():
-            raise SystemExit(f"Ollama src_files path must be relative: {rel_path}")
-        if normalized.parts and normalized.parts[0] == "generated":
-            raise SystemExit(f"Ollama must not write src/generated: {rel_path}")
-
     return bundle
-
-
-def collect_current_src_files(source_root: Path) -> dict[str, str]:
-    current: dict[str, str] = {}
-    if not source_root.exists():
-        return current
-
-    for path in sorted(source_root.rglob("*.py")):
-        rel_path = path.relative_to(source_root)
-        if rel_path.parts and rel_path.parts[0] == "generated":
-            continue
-        current[rel_path.as_posix()] = path.read_text(encoding="utf-8")
-    return current
 
 
 def main() -> None:
@@ -1161,7 +1193,23 @@ def main() -> None:
     argocd_application_path = argocd_root / f"{app_dir_name}-application.yaml"
 
     contract = expected_contract(spec)
-    current_files = collect_current_src_files(source_root)
+    current_files = {
+        "app_main_py": app_main_path.read_text(encoding="utf-8")
+        if app_main_path.exists()
+        else "",
+        "k8s_namespace_yaml": namespace_path.read_text(encoding="utf-8")
+        if namespace_path.exists()
+        else "",
+        "k8s_deployment_yaml": deployment_path.read_text(encoding="utf-8")
+        if deployment_path.exists()
+        else "",
+        "k8s_service_yaml": service_path.read_text(encoding="utf-8")
+        if service_path.exists()
+        else "",
+        "k8s_ingress_yaml": ingress_path.read_text(encoding="utf-8")
+        if ingress_path.exists()
+        else "",
+    }
 
     if args.provider == "ollama":
         contract_source = llm_contract_codegen_with_ollama(
@@ -1177,12 +1225,18 @@ def main() -> None:
             args.ollama_base_url,
             args.ollama_timeout_seconds,
         )
-        src_files = bundle["src_files"]
-        app_source = src_files["main.py"]
+        app_source = bundle["app_main_py"]
+        namespace_source = bundle["k8s_namespace_yaml"]
+        deployment_source = bundle["k8s_deployment_yaml"]
+        service_source = bundle["k8s_service_yaml"]
+        ingress_source = bundle["k8s_ingress_yaml"]
         app_violations = validate_app_source_against_spec(app_source, spec)
         if app_violations:
-            src_files = {"main.py": app_module_body_from_contract(contract)}
             app_source = app_module_body_from_contract(contract)
+            namespace_source = namespace_manifest_from_spec(spec)
+            deployment_source = deployment_manifest_from_spec(spec, app_dir_name)
+            service_source = service_manifest_from_spec(spec)
+            ingress_source = ingress_manifest_from_spec(spec, app_dir_name)
             app_codegen_provider = "ollama-validated-fallback"
         else:
             app_codegen_provider = "ollama"
@@ -1192,12 +1246,11 @@ def main() -> None:
             app_source = app_module_body_from_contract(contract)
         else:
             app_source = generic_app_module_body(contract, service.replace("-", " ").title())
-        src_files = {"main.py": app_source}
+        namespace_source = namespace_manifest_from_spec(spec)
+        deployment_source = deployment_manifest_from_spec(spec, app_dir_name)
+        service_source = service_manifest_from_spec(spec)
+        ingress_source = ingress_manifest_from_spec(spec, app_dir_name)
         app_codegen_provider = "deterministic-template"
-    namespace_source = namespace_manifest_from_spec(spec)
-    deployment_source = deployment_manifest_from_spec(spec, app_dir_name)
-    service_source = service_manifest_from_spec(spec)
-    ingress_source = ingress_manifest_from_spec(spec, app_dir_name)
     argocd_application_source = ""
     if argocd_config["enabled"]:
         argocd_application_source = argocd_application_manifest_from_spec(
@@ -1214,12 +1267,7 @@ def main() -> None:
     source_init_path.write_text("", encoding="utf-8")
     init_path.write_text("", encoding="utf-8")
     contract_path.write_text(contract_source, encoding="utf-8")
-    written_src_files: list[str] = []
-    for rel_path, content in src_files.items():
-        target = source_root / rel_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        written_src_files.append(str(target.resolve()))
+    app_main_path.write_text(app_source, encoding="utf-8")
     dockerfile_path.write_text(dockerfile_body(app_dir_name), encoding="utf-8")
     app_readme_path.write_text(service_readme_body(app_dir_name), encoding="utf-8")
     src_readme_path.write_text(src_readme_body(), encoding="utf-8")
@@ -1243,14 +1291,13 @@ def main() -> None:
         "app_module_path": str(app_main_path),
         "provider": args.provider,
         "app_codegen_provider": app_codegen_provider,
-        "gitops_codegen_provider": "deterministic-template",
+        "gitops_codegen_provider": app_codegen_provider,
         "argocd_codegen_provider": "deterministic-template" if argocd_config["enabled"] else None,
         "ollama_model": args.ollama_model if args.provider == "ollama" else None,
         "app_path": str(app_root),
         "gitops_path": str(gitops_root),
         "argocd_application_path": str(argocd_application_path) if argocd_config["enabled"] else None,
         "constants": contract,
-        "src_files": sorted(src_files.keys()),
         "app_routes": [
             {"method": method, "path": path}
             for method, path in sorted(route_map_from_source(app_source))
@@ -1265,7 +1312,7 @@ def main() -> None:
         "generated_files": [
             str(contract_path.resolve()),
             str(source_init_path.resolve()),
-            *written_src_files,
+            str(app_main_path.resolve()),
             str(dockerfile_path.resolve()),
             str(app_readme_path.resolve()),
             str(src_readme_path.resolve()),

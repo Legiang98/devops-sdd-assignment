@@ -12,7 +12,6 @@ on:
       - "applications/**/specs/*.yaml"
       - "devops/agent/**"
       - "devops/policy/**"
-      - "devops/scripts/**"
       - "scripts/**"
       - ".github/workflows/spec-driven-build.yml"
   pull_request:
@@ -20,7 +19,6 @@ on:
       - "applications/**/specs/*.yaml"
       - "devops/agent/**"
       - "devops/policy/**"
-      - "devops/scripts/**"
       - "scripts/**"
       - ".github/workflows/spec-driven-build.yml"
 
@@ -243,7 +241,7 @@ jobs:
             -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
             .
 
-          ./devops/scripts/update_image_tag.sh "${{ needs.resolve.outputs.manifest_dir }}" "${IMAGE_REPOSITORY}" "${IMAGE_TAG}"
+          ./scripts/update_image_tag.sh "${{ needs.resolve.outputs.manifest_dir }}" "${IMAGE_REPOSITORY}" "${IMAGE_TAG}"
 
           echo "image_repository=${IMAGE_REPOSITORY}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"

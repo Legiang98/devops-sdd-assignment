@@ -1,0 +1,36 @@
+Reference prompt notes for the next rebuild.
+
+Current prompt responsibilities:
+1. Contract generation
+- Return only valid Python constant assignments.
+- First line must be `"""Auto-generated from spec. Do not edit manually."""`
+- Inputs:
+  - schema_version
+  - change_id
+  - service
+  - baseline_stages
+  - new_stage_name
+  - new_stage_threshold
+- Output shape:
+  - SCHEMA_VERSION
+  - CHANGE_ID
+  - SERVICE
+  - BASELINE_STAGES
+  - NEW_STAGE_NAME
+  - NEW_STAGE_THRESHOLD
+
+2. App and GitOps generation
+- Return only valid JSON.
+- Update exactly one application and its matching GitOps manifests.
+- Keep output deterministic and concise.
+- Preserve spec constants import from `src.generated.spec_contract`.
+- Generate only routes declared in the spec, plus `/health` and `/metrics`.
+- If reject endpoint is enabled, require `reason_code` and `comment`.
+- Return these string fields:
+  - app_main_py
+  - k8s_namespace_yaml
+  - k8s_deployment_yaml
+  - k8s_service_yaml
+  - k8s_ingress_yaml
+
+This file is reference-only. Runtime prompt assembly now lives in `devops/agent/generate_code.py`.

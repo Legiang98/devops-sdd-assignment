@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from devops.specs import load_resolved_spec
+from devops.spec.specs import load_resolved_spec
 
 
 def parse_args() -> argparse.Namespace:

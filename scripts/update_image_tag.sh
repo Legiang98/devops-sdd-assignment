@@ -6,7 +6,7 @@ if [ "$#" -ne 3 ]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_MANIFEST_DIR="$ROOT/$1"
 IMAGE_REPOSITORY="$2"
 IMAGE_TAG="$3"

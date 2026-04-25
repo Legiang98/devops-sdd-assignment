@@ -1,4 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+"""Validate deterministic contract artifacts produced from a spec."""
+
+from __future__ import annotations
+
 import argparse
 import json
 import sys
@@ -6,11 +10,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from devops.specs import load_resolved_spec
+from devops.spec.specs import load_resolved_spec
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Policy gate: spec/output alignment")
+    parser = argparse.ArgumentParser(description="Validate generated contract artifacts")
     parser.add_argument("--spec", required=True, help="Path to spec YAML")
     parser.add_argument("--release-dir", required=True, help="Path to release directory")
     return parser.parse_args()
@@ -29,16 +33,6 @@ def main() -> None:
 
     violations: list[str] = []
 
-    docs = spec.get("docs", {})
-    swagger = docs.get("swagger") if isinstance(docs, dict) else None
-    if not isinstance(swagger, dict):
-        violations.append("docs.swagger is required")
-    else:
-        swagger_path = swagger.get("path")
-        swagger_url = swagger.get("url")
-        if not swagger_path and not swagger_url:
-            violations.append("docs.swagger.path or docs.swagger.url is required")
-
     expected_change_id = spec["change_id"]
     if rules.get("release_id") != expected_change_id:
         violations.append("rules.release_id must match spec.change_id")
@@ -51,22 +45,23 @@ def main() -> None:
         expected_stages.append(spec["workflow_change"]["new_stage"])
 
     actual_stages = rules["workflow"]["stages"]
-
     if len(expected_stages) != len(actual_stages):
         violations.append("workflow stage count mismatch")
 
-    for idx, expected in enumerate(expected_stages):
-        if idx >= len(actual_stages):
-            violations.append(f"missing stage at index {idx}: {expected['name']}")
+    for index, expected in enumerate(expected_stages):
+        if index >= len(actual_stages):
+            violations.append(f"missing stage at index {index}: {expected['name']}")
             continue
-        actual = actual_stages[idx]
+
+        actual = actual_stages[index]
         if actual.get("name") != expected.get("name"):
-            violations.append(f"stage[{idx}] name mismatch")
-        e_threshold = expected["required_when"]["amount_gte"]
-        a_threshold = actual["required_when"]["amount_gte"]
-        if a_threshold != e_threshold:
+            violations.append(f"stage[{index}] name mismatch")
+
+        expected_threshold = expected["required_when"]["amount_gte"]
+        actual_threshold = actual["required_when"]["amount_gte"]
+        if actual_threshold != expected_threshold:
             violations.append(
-                f"stage[{idx}] threshold mismatch: expected {e_threshold}, got {a_threshold}"
+                f"stage[{index}] threshold mismatch: expected {expected_threshold}, got {actual_threshold}"
             )
 
     report = {
@@ -79,17 +74,17 @@ def main() -> None:
 
     evidence_dir = release_dir / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    (evidence_dir / "policy-report.json").write_text(
+    (evidence_dir / "contract-policy-report.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8"
     )
 
     if violations:
-        print("Policy gate failed:")
-        for v in violations:
-            print(f"- {v}")
+        print("Contract artifact validation failed:")
+        for violation in violations:
+            print(f"- {violation}")
         raise SystemExit(1)
 
-    print("Policy gate passed")
+    print("Contract artifact validation passed")
 
 
 if __name__ == "__main__":

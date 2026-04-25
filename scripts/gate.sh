@@ -51,11 +51,11 @@ PY
     exit 1
   fi
 
-  if ! opa eval --fail-defined -d devops/policy/spec_alignment.rego -i "$POLICY_INPUT" \
-    'data.policy.spec_alignment.deny[_]' >/dev/null; then
-    echo "[gate] spec alignment failed"
-    opa eval --format=pretty -d devops/policy/spec_alignment.rego -i "$POLICY_INPUT" \
-      'data.policy.spec_alignment.deny'
+  if ! opa eval --fail-defined -d devops/policy/generated_output.rego -i "$POLICY_INPUT" \
+    'data.policy.generated_output.deny[_]' >/dev/null; then
+    echo "[gate] generated output policy failed"
+    opa eval --format=pretty -d devops/policy/generated_output.rego -i "$POLICY_INPUT" \
+      'data.policy.generated_output.deny'
     exit 1
   fi
 
@@ -64,6 +64,6 @@ else
   echo "[gate] opa not found, skipping Rego checks"
 fi
 
-# Keep existing Python gate to produce evidence report under build/releases/<id>/evidence.
-python3 devops/policy/check_spec_alignment.py --spec "$SPEC" --release-dir "$RELEASE_DIR"
-python3 devops/policy/check_generated_code_alignment.py --spec "$SPEC" --release-dir "$RELEASE_DIR"
+# Keep Python gates to produce evidence reports under build/releases/<id>/evidence.
+python3 devops/policy/validate_contract_artifacts.py --spec "$SPEC" --release-dir "$RELEASE_DIR"
+python3 devops/policy/validate_generated_output.py --spec "$SPEC" --release-dir "$RELEASE_DIR"

@@ -178,3 +178,16 @@ kubectl port-forward svc/expense-workflow 3001:80 -n devops-ssd-assignment
 ## Demo Focus
 
 The main demo currently centers on the `expense-workflow-service` and shows how a small API change moves through the full pipeline with traceable artifacts and policy enforcement.
+
+## Feature Branch Workflow
+
+For spec-driven development work, `feat/*` branches now follow a small review-first workflow:
+1. **Spec Scan**: detect exactly one changed spec under `applications/*/specs/*.yaml`.
+2. **Spec Validation**: validate the resolved spec first and fail the pipeline immediately on policy errors.
+3. **Generate Code & Artifacts**: run deterministic generation and upload the generated output as workflow artifacts.
+4. **Create Pull Request**: open or reuse a PR from the `feat/*` branch to `main`.
+
+Notes:
+- This workflow does not deploy.
+- This workflow does not perform rollback.
+- The agent does not commit directly in this stage.
