@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd()))
 
-from devops.specs import load_resolved_spec
+from devops.spec.specs import load_resolved_spec
 
 spec_path = Path(sys.argv[1])
 release_dir = Path(sys.argv[2])

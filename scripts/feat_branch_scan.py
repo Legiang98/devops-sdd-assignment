@@ -28,6 +28,10 @@ def parse_args() -> argparse.Namespace:
         "--spec",
         help="Explicit spec path. Skips git diff scanning when provided.",
     )
+    parser.add_argument(
+        "--github-output",
+        help="Optional path to GitHub Actions output file.",
+    )
     return parser.parse_args()
 
 
@@ -87,7 +91,17 @@ def resolve_spec(args: argparse.Namespace) -> dict[str, str]:
 
 
 def main() -> None:
-    print(json.dumps(resolve_spec(parse_args())))
+    args = parse_args()
+    payload = resolve_spec(args)
+
+    if args.github_output:
+        output_path = Path(args.github_output)
+        with output_path.open("a", encoding="utf-8") as handle:
+            for key, value in payload.items():
+                handle.write(f"{key}={value}\n")
+        return
+
+    print(json.dumps(payload))
 
 
 if __name__ == "__main__":
