@@ -4,9 +4,9 @@ import json
 import os
 import time
 import uuid
-from typing import Any
+from typing import Any, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path, Request
 from fastapi.responses import Response
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -115,7 +115,7 @@ def load_rules() -> dict[str, Any]:
         return {"workflow": {"stages": stages}}
 
 
-def required_stages_for_amount(amount: float, rules: dict[str, Any]) -> list[str]:
+def required_stages_for_amount(amount: float, rules: dict[str, Any]) -> List[str]:
     stages = []
     for stage in rules["workflow"]["stages"]:
         threshold = float(stage["required_when"]["amount_gte"])
@@ -197,41 +197,18 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
 
     if set(expense["approved_stages"]) == set(expense["required_stages"]):
         expense["status"] = "APPROVED"
+        expense_submitted_total.dec()
         expense_approved_total.inc()
 
     audit(
-        "expense_approved_step",
+        "expense_approved",
         {
             "expense_id": expense_id,
-            "approved_role": req.role,
-            "status": expense["status"],
+            "role": req.role,
         },
     )
 
     return expense
-
-
-
-
-
-
-
-
-
-@app.get("/expenses/{expense_id}/summary")
-def get_expense_summary(expense_id: str) -> dict[str, Any]:
-    expense = EXPENSES.get(expense_id)
-    if not expense:
-        raise HTTPException(status_code=404, detail="Expense not found")
-
-    return {
-        "id": expense["id"],
-        "amount": str(expense["amount"]),
-        "description": expense["description"],
-        "status": expense["status"],
-    }
-
-
 
 
 @app.get("/metrics")
