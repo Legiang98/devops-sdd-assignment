@@ -98,7 +98,8 @@ jobs:
         if: steps.detect.outputs.changed == 'true'
         id: capture_diff
         run: |
-          git diff devops/k8s/ > manifest.diff
+          git add -A devops/k8s/
+          git diff --cached devops/k8s/ > manifest.diff
           echo "body<<EOF" >> "$GITHUB_OUTPUT"
           echo "### 🚀 Manifest Changes for ${{ steps.detect.outputs.app_name }}" >> "$GITHUB_OUTPUT"
           echo "\`\`\`diff" >> "$GITHUB_OUTPUT"

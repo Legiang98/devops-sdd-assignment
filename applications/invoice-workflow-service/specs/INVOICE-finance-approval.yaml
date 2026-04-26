@@ -37,3 +37,5 @@ observability_assertions:
     expected_behavior: increment only for invoices >= 5000
   - metric: expense_approved_total
     expected_behavior: increment when all required stages complete
+
+# test 7
