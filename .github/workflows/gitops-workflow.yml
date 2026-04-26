@@ -23,7 +23,9 @@ jobs:
     outputs:
       should_run: ${{ steps.detect.outputs.changed }}
       app_name: ${{ steps.detect.outputs.app_name }}
+      app_path: ${{ steps.detect.outputs.app_path }}
       manifest_dir: ${{ steps.detect.outputs.manifest_dir }}
+      argocd_application_path: ${{ steps.detect.outputs.argocd_application_path }}
       diff_body: ${{ steps.capture_diff.outputs.body }}
     steps:
       - name: Checkout
@@ -52,9 +54,13 @@ jobs:
           fi
           
           APP_NAME=$(basename $(dirname $(dirname "$SPEC_FILE")))
+          APP_PATH="applications/$APP_NAME"
+          ARGOCD_APPLICATION_PATH="devops/k8s/argocd/${APP_NAME}-application.yaml"
           echo "detected_spec=$SPEC_FILE" >> "$GITHUB_OUTPUT"
           echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "manifest_dir=devops/k8s/$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "argocd_application_path=$ARGOCD_APPLICATION_PATH" >> "$GITHUB_OUTPUT"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Build App Image via Minikube
@@ -98,12 +104,35 @@ jobs:
         if: steps.detect.outputs.changed == 'true'
         id: capture_diff
         run: |
-          git add -A devops/k8s/
-          git diff --cached devops/k8s/ > manifest.diff
+          set -euo pipefail
+          SOURCE_DIFF_FILE=source.diff
+          DEPLOY_DIFF_FILE=deploy.diff
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            git diff "${{ github.event.before }}" "${{ github.sha }}" -- \
+              "${{ steps.detect.outputs.app_path }}" \
+              "${{ steps.detect.outputs.detected_spec }}" > "$SOURCE_DIFF_FILE"
+          else
+            : > "$SOURCE_DIFF_FILE"
+          fi
+          git add -A \
+            "${{ steps.detect.outputs.manifest_dir }}" \
+            "${{ steps.detect.outputs.argocd_application_path }}"
+          git diff --cached -- \
+            "${{ steps.detect.outputs.manifest_dir }}" \
+            "${{ steps.detect.outputs.argocd_application_path }}" > "$DEPLOY_DIFF_FILE"
           echo "body<<EOF" >> "$GITHUB_OUTPUT"
-          echo "### 🚀 Manifest Changes for ${{ steps.detect.outputs.app_name }}" >> "$GITHUB_OUTPUT"
+          echo "### 🚀 Planned Changes for ${{ steps.detect.outputs.app_name }}" >> "$GITHUB_OUTPUT"
+          if [ -s "$SOURCE_DIFF_FILE" ]; then
+            echo "" >> "$GITHUB_OUTPUT"
+            echo "#### Source Diff" >> "$GITHUB_OUTPUT"
+            echo "\`\`\`diff" >> "$GITHUB_OUTPUT"
+            cat "$SOURCE_DIFF_FILE" >> "$GITHUB_OUTPUT"
+            echo "\`\`\`" >> "$GITHUB_OUTPUT"
+          fi
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "#### GitOps Diff" >> "$GITHUB_OUTPUT"
           echo "\`\`\`diff" >> "$GITHUB_OUTPUT"
-          cat manifest.diff >> "$GITHUB_OUTPUT"
+          cat "$DEPLOY_DIFF_FILE" >> "$GITHUB_OUTPUT"
           echo "\`\`\`" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
@@ -112,7 +141,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: manifests-${{ github.run_id }}
-          path: devops/k8s/
+          path: |
+            ${{ steps.detect.outputs.manifest_dir }}/
+            ${{ steps.detect.outputs.argocd_application_path }}
 
   approve:
     name: Manual Approval
@@ -157,7 +188,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "devops/k8s/${{ needs.build.outputs.app_name }}"
+          git add "${{ needs.build.outputs.manifest_dir }}"
+          git add "${{ needs.build.outputs.argocd_application_path }}"
           
           if git diff --cached --quiet; then
             echo "No changes to commit"

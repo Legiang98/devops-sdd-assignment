@@ -20,6 +20,7 @@ OBSERVABILITY_WORKFLOW_REF = "feat/post-deployment"
 POST_DEPLOY_ENV_CONFIGMAP_NAME = "post-deployment-evaluation-env"
 PROMETHEUS_URL_ENV_NAME = "PROMETHEUS_URL"
 LOKI_URL_ENV_NAME = "LOKI_URL"
+ARGOCD_APPLICATIONS_DIR = Path("devops/k8s/argocd")
 
 
 def parse_args():
@@ -48,6 +49,16 @@ def load_yaml(path: Path) -> dict:
 
 def dump_yaml(document: dict) -> str:
     return yaml.safe_dump(document, sort_keys=False)
+
+
+def repo_url_for_argocd() -> str:
+    repo_secret_path = ARGOCD_APPLICATIONS_DIR / "repo-secret.yaml"
+    if repo_secret_path.exists():
+        repo_secret = yaml.safe_load(repo_secret_path.read_text(encoding="utf-8")) or {}
+        secret_url = ((repo_secret.get("stringData") or {}).get("url") or "").strip()
+        if secret_url:
+            return secret_url
+    return ""
 
 
 def resolve_application_root(spec_path: Path) -> Path:
@@ -449,6 +460,39 @@ def render_post_deploy_evaluation_job(
     }
 
 
+def render_argocd_application(
+    app_slug_value: str,
+    namespace: str,
+) -> dict:
+    return {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Application",
+        "metadata": {
+            "name": app_slug_value,
+            "namespace": ARGOCD_NAMESPACE,
+        },
+        "spec": {
+            "destination": {
+                "namespace": namespace,
+                "server": "https://kubernetes.default.svc",
+            },
+            "project": "default",
+            "source": {
+                "path": f"devops/k8s/{app_slug_value}",
+                "repoURL": repo_url_for_argocd(),
+                "targetRevision": "HEAD",
+            },
+            "syncPolicy": {
+                "automated": {
+                    "prune": True,
+                    "selfHeal": True,
+                },
+                "syncOptions": ["CreateNamespace=true"],
+            },
+        },
+    }
+
+
 def build_manifest_bundle(app_root: Path, baseline_spec: dict) -> dict[str, str]:
     toggles = manifest_toggles(baseline_spec)
     app_slug_value = app_slug(app_root, baseline_spec)
@@ -519,6 +563,17 @@ def scaffold_manifests(output_dir: Path, manifest_bundle: dict[str, str]) -> lis
     return written_files
 
 
+def scaffold_argocd_application(app_slug_value: str, namespace: str) -> Path:
+    ARGOCD_APPLICATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    path = ARGOCD_APPLICATIONS_DIR / f"{app_slug_value}-application.yaml"
+    if not path.exists():
+        path.write_text(
+            dump_yaml(render_argocd_application(app_slug_value, namespace)),
+            encoding="utf-8",
+        )
+    return path
+
+
 def main():
     args = parse_args()
     spec_path = Path(args.spec).resolve()
@@ -546,11 +601,16 @@ def main():
         )
 
     written_files = scaffold_manifests(output_dir, manifest_bundle)
+    argocd_application_path = scaffold_argocd_application(
+        app_slug(app_root, baseline_spec),
+        namespace_name(baseline_spec),
+    )
     if written_files:
         for filename in written_files:
             print(f"[+] Generated: {output_dir / filename}")
     else:
         print("[*] No files written. Existing manifests were preserved.")
+    print(f"[*] Ensured Argo CD application manifest: {argocd_application_path}")
 
 
 if __name__ == "__main__":

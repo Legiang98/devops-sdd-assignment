@@ -25,6 +25,7 @@ jobs:
       release_id: ${{ steps.scan.outputs.release_id }}
       app_path: ${{ steps.scan.outputs.app_path }}
       manifest_path: ${{ steps.scan.outputs.manifest_path }}
+      argocd_application_path: ${{ steps.scan.outputs.argocd_application_path }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,9 +58,12 @@ jobs:
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
           APP_PATH="$(python3 -c "from pathlib import Path; print(Path('${SPEC_FILE}').parents[1].as_posix())")"
-          MANIFEST_PATH="$(python3 -c "from pathlib import Path; print('devops/k8s/' + Path('${SPEC_FILE}').parents[1].name)")"
+          APP_NAME="$(python3 -c "from pathlib import Path; print(Path('${SPEC_FILE}').parents[1].name)")"
+          MANIFEST_PATH="devops/k8s/${APP_NAME}"
+          ARGOCD_APPLICATION_PATH="devops/k8s/argocd/${APP_NAME}-application.yaml"
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "manifest_path=$MANIFEST_PATH" >> "$GITHUB_OUTPUT"
+          echo "argocd_application_path=$ARGOCD_APPLICATION_PATH" >> "$GITHUB_OUTPUT"
 
   validate_spec:
     runs-on: [self-hosted, macOS]
@@ -130,6 +134,7 @@ jobs:
 
           git add "${{ needs.scan_spec.outputs.app_path }}"
           git add "${{ needs.scan_spec.outputs.manifest_path }}"
+          git add "${{ needs.scan_spec.outputs.argocd_application_path }}"
 
           if git diff --cached --quiet; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"

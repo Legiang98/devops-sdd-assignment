@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -9,6 +10,7 @@ from devops.agent.generate_gitops import (
     find_baseline_spec,
     manifest_status,
     required_manifest_files,
+    scaffold_argocd_application,
     scaffold_manifests,
 )
 
@@ -75,9 +77,21 @@ class GenerateGitOpsTests(unittest.TestCase):
             post_deploy_job = yaml.safe_load(
                 (output_dir / "post-deploy-evaluation-job.yaml").read_text(encoding="utf-8")
             )
+            with mock.patch("devops.agent.generate_gitops.ARGOCD_APPLICATIONS_DIR", Path(tmpdir) / "devops" / "k8s" / "argocd"):
+                argocd_application_path = scaffold_argocd_application(
+                    "invoice-workflow-service",
+                    "devops-ssd-assignment",
+                )
+                argocd_application = yaml.safe_load(argocd_application_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 post_deploy_job["metadata"]["annotations"]["argocd.argoproj.io/hook"],
                 "PostSync",
+            )
+            self.assertEqual(argocd_application["kind"], "Application")
+            self.assertEqual(argocd_application["metadata"]["name"], "invoice-workflow-service")
+            self.assertEqual(
+                argocd_application["spec"]["source"]["path"],
+                "devops/k8s/invoice-workflow-service",
             )
             self.assertEqual(post_deploy_job["metadata"]["namespace"], "argocd")
             token_env = next(
