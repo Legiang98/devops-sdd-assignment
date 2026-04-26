@@ -5,8 +5,6 @@ metadata:
   namespace: devops-ssd-assignment
   labels:
     app: invoice-workflow-service
-    app.kubernetes.io/name: invoice-workflow-service
-    app.kubernetes.io/managed-by: gitops-agent
 spec:
   replicas: 1
   selector:
@@ -16,23 +14,20 @@ spec:
     metadata:
       labels:
         app: invoice-workflow-service
-        app.kubernetes.io/name: invoice-workflow-service
-        app.kubernetes.io/managed-by: gitops-agent
     spec:
       containers:
-      - name: invoice-workflow-service
-        image: invoice-workflow-service:5ba663f41a56
-        ports:
-        - containerPort: 8000
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /readiness
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 10
+        - name: app
+          image: invoice-workflow-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: RULES_PATH
+              value: /runtime/rules.json
+            - name: RELEASE_ID_FILE
+              value: /runtime/release_id.txt
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://alloy.monitoring.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: invoice-workflow-service

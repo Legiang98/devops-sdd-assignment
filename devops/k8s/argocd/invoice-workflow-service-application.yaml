@@ -10,7 +10,7 @@ spec:
   project: default
   source:
     path: devops/k8s/invoice-workflow-service
-    repoURL: git@github.com:Legiang98/devops-sdd-assignment.git
+    repoURL: https://github.com/Legiang98/devops-sdd-assignment
     targetRevision: HEAD
   syncPolicy:
     automated:
