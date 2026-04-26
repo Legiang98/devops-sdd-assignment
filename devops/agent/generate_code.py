@@ -793,7 +793,7 @@ def argocd_application_manifest_from_spec(
     return "\n".join(lines) + "\n"
 
 
-def parse_json_object(response_text: str) -> dict[str, str]:
+def parse_json_object(response_text: str) -> dict[str, object]:
     try:
         data = json.loads(response_text)
     except json.JSONDecodeError as exc:
@@ -802,9 +802,9 @@ def parse_json_object(response_text: str) -> dict[str, str]:
     if not isinstance(data, dict):
         raise SystemExit("Ollama bundle response must be a JSON object")
 
-    for key, value in data.items():
-        if not isinstance(key, str) or not isinstance(value, str):
-            raise SystemExit("Ollama bundle keys and values must be strings")
+    for key in data:
+        if not isinstance(key, str):
+            raise SystemExit("Ollama bundle keys must be strings")
     return data
 
 

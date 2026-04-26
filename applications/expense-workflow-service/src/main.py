@@ -1,12 +1,10 @@
-"""Auto-generated service module from spec. Do not edit manually."""
-
 import json
 import os
 import time
 import uuid
-from typing import Any
+from typing import Any, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path, Request
 from fastapi.responses import Response
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -82,12 +80,6 @@ class ApproveExpenseRequest(BaseModel):
     role: str
 
 
-class RejectExpenseRequest(BaseModel):
-    role: str
-    reason_code: str | None = None
-    comment: str | None = None
-
-
 def read_release_id() -> str:
     try:
         with open(RELEASE_ID_FILE, "r", encoding="utf-8") as f:
@@ -115,7 +107,7 @@ def load_rules() -> dict[str, Any]:
         return {"workflow": {"stages": stages}}
 
 
-def required_stages_for_amount(amount: float, rules: dict[str, Any]) -> list[str]:
+def required_stages_for_amount(amount: float, rules: dict[str, Any]) -> List[str]:
     stages = []
     for stage in rules["workflow"]["stages"]:
         threshold = float(stage["required_when"]["amount_gte"])
@@ -149,12 +141,12 @@ def health() -> dict[str, str]:
 @app.post("/expenses")
 def submit_expense(req: SubmitExpenseRequest) -> dict[str, Any]:
     rules = load_rules()
-    stages = required_stages_for_amount(req.amount, rules)
+    stages = required_stages_for_amount(float(req.amount), rules)
 
     expense_id = str(uuid.uuid4())
     EXPENSES[expense_id] = {
         "id": expense_id,
-        "amount": req.amount,
+        "amount": float(req.amount),
         "description": req.description,
         "required_stages": stages,
         "approved_stages": [],
@@ -169,8 +161,8 @@ def submit_expense(req: SubmitExpenseRequest) -> dict[str, Any]:
         "expense_submitted",
         {
             "expense_id": expense_id,
-            "amount": req.amount,
-            "required_stages": stages,
+            "amount": str(req.amount),
+            "required_stages": json.dumps(stages),
         },
     )
 
@@ -197,41 +189,18 @@ def approve_expense(expense_id: str, req: ApproveExpenseRequest) -> dict[str, An
 
     if set(expense["approved_stages"]) == set(expense["required_stages"]):
         expense["status"] = "APPROVED"
+        expense_submitted_total.dec()
         expense_approved_total.inc()
 
     audit(
-        "expense_approved_step",
+        "expense_approved",
         {
             "expense_id": expense_id,
-            "approved_role": req.role,
-            "status": expense["status"],
+            "role": req.role,
         },
     )
 
     return expense
-
-
-
-
-
-
-
-
-
-@app.get("/expenses/{expense_id}/summary")
-def get_expense_summary(expense_id: str) -> dict[str, Any]:
-    expense = EXPENSES.get(expense_id)
-    if not expense:
-        raise HTTPException(status_code=404, detail="Expense not found")
-
-    return {
-        "id": expense["id"],
-        "amount": expense["amount"],
-        "description": expense["description"],
-        "status": expense["status"],
-    }
-
-
 
 
 @app.get("/metrics")

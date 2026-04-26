@@ -34,7 +34,7 @@ observability_assertions:
   - metric: approval_step_required_total
     labels:
       step: finance
-    expected_behavior: increment only for expenses >= 1000
+    expected_behavior: increment only for expenses >= 3000
   - metric: expense_approved_total
     expected_behavior: increment when all required stages complete
 
