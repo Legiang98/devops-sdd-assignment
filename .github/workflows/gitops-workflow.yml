@@ -97,41 +97,49 @@ jobs:
           fi
           echo "✅ OPA policy check passed."
 
-      - name: Update Image Tag in Manifests
+      - name: Update Image Tag and Push Proposal
+        id: push_proposal
+        env:
+          GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
         run: |
+          set -euo pipefail
+          APP_NAME="${{ needs.build.outputs.app_name }}"
+          MANIFEST_DIR="${{ needs.build.outputs.manifest_dir }}"
           IMAGE_TAG="${GITHUB_SHA::12}"
-          ./scripts/update_image_tag.sh "${{ needs.build.outputs.manifest_dir }}" "${{ needs.build.outputs.app_name }}" "$IMAGE_TAG"
+          PROP_BRANCH="proposal/${APP_NAME}-${GITHUB_SHA::8}"
+
+          ./scripts/update_image_tag.sh "$MANIFEST_DIR" "$APP_NAME" "$IMAGE_TAG"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$MANIFEST_DIR"
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            echo "prop_branch=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "ci(gitops): propose manifest update for $APP_NAME"
+          git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+          git push origin "HEAD:$PROP_BRANCH"
+          echo "prop_branch=$PROP_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Create Approval Issue
+        if: steps.push_proposal.outputs.prop_branch != ''
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.FINE_GRAINED_PAT }}
           script: |
             const { owner, repo } = context.repo;
             const app = "${{ needs.build.outputs.app_name }}";
-            const diff = require('child_process').execSync('git diff devops/k8s/').toString();
+            const branch = "${{ steps.push_proposal.outputs.prop_branch }}";
+            const diff = require('child_process').execSync('git diff origin/${{ github.ref_name }} ' + branch + ' -- devops/k8s/').toString();
             
             await github.rest.issues.create({
               owner,
               repo,
               title: `[GitOps Approval Required] manifest update for ${app}`,
               labels: ['gitops-approval'],
-              body: `### 🚀 Manifest Update Request\n\nApplication: **${app}**\n\n#### Diff Evidence:\n\`\`\`diff\n${diff}\n\`\`\`\n\nPlease review and comment \`/approve\` to proceed.`
+              body: `### 🚀 Manifest Update Request\n\nApplication: **${app}**\nProposal Branch: \`${branch}\`\nTarget Branch: \`${{ github.ref_name }}\`\n\n#### Diff Evidence:\n\`\`\`diff\n${diff}\n\`\`\`\n\nPlease review and comment \`/approve\` to merge these changes.`
             });
-
-      - name: Push to Git
-        env:
-          GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${{ needs.build.outputs.manifest_dir }}"
-          
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          git commit -m "ci(gitops): update ${{ needs.build.outputs.app_name }} manifests [skip ci]"
-          git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
-          git push origin "HEAD:${{ github.ref_name }}"
