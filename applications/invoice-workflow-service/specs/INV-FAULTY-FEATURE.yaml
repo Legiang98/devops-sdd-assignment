@@ -4,7 +4,7 @@ description: A feature that will cause the service to crash for demo purposes.
 change_id: demo-faulty-id
 
 endpoints:
-  - path: /invoices/faulty-1234567
+  - path: /invoices/faulty-4567
     method: POST
     description: This endpoint will never be reached because the app will crash.
     responses:
