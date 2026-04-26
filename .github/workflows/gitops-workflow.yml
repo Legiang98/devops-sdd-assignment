@@ -134,7 +134,7 @@ jobs:
             const { owner, repo } = context.repo;
             const app = "${{ needs.build.outputs.app_name }}";
             const branch = "${{ steps.push_proposal.outputs.prop_branch }}";
-            const diff = require('child_process').execSync('git diff origin/${{ github.ref_name }} ' + branch + ' -- devops/k8s/').toString();
+            const diff = require('child_process').execSync('git diff origin/${{ github.ref_name }} HEAD -- devops/k8s/').toString();
             
             await github.rest.issues.create({
               owner,

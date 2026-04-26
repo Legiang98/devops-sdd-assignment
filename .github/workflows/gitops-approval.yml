@@ -9,7 +9,9 @@ jobs:
     if: |
       github.event.issue.pull_request == null &&
       contains(github.event.issue.labels.*.name, 'gitops-approval') &&
-      contains(github.event.comment.body, '/approve')
+      (contains(github.event.comment.body, '/approve') || 
+       contains(github.event.comment.body, 'lgtm') || 
+       contains(github.event.comment.body, 'LGTM'))
     runs-on: [self-hosted, macOS]
     steps:
       - name: Checkout Target Branch
