@@ -1,0 +1,73 @@
+"""Auto-generated service module from spec. Do not edit manually."""
+
+from fastapi import FastAPI
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+
+from src.generated.spec_contract import (
+    API_ENDPOINTS,
+    BASELINE_STAGES,
+    CHANGE_ID,
+    NEW_STAGE_NAME,
+    NEW_STAGE_THRESHOLD,
+    REJECT_ENDPOINT_ENABLED,
+    SCHEMA_VERSION,
+    SERVICE,
+)
+
+app = FastAPI(title="Purchase Request Workflow Service")
+
+request_total = Counter("generated_request_total", "Generated placeholder requests", ["method", "path"])
+
+
+@app.get("/health")
+def health() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "schema_version": SCHEMA_VERSION,
+        "baseline_stages": BASELINE_STAGES,
+        "new_stage_name": NEW_STAGE_NAME,
+        "new_stage_threshold": NEW_STAGE_THRESHOLD,
+        "reject_endpoint_enabled": REJECT_ENDPOINT_ENABLED,
+        "api_endpoints": API_ENDPOINTS,
+    }
+
+
+@app.post("/purchase-requests")
+def endpoint_0(payload: dict[str, object] | None = None) -> dict[str, object]:
+    return {
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "method": "POST",
+        "path": "/purchase-requests",
+        "payload": payload or {},
+        "message": "Generated endpoint placeholder",
+    }
+
+@app.get("/purchase-requests/{request_id}")
+def endpoint_1_path(request_id: str) -> dict[str, object]:
+    return {
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "method": "GET",
+        "path": "/purchase-requests/{request_id}",
+        "message": "Generated endpoint placeholder", "path_params": {"request_id": request_id},
+    }
+
+@app.post("/purchase-requests/{request_id}/approve")
+def endpoint_2_path(request_id: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+    return {
+        "change_id": CHANGE_ID,
+        "service": SERVICE,
+        "method": "POST",
+        "path": "/purchase-requests/{request_id}/approve",
+        "payload": payload or {},
+        "message": "Generated endpoint placeholder", "path_params": {"request_id": request_id},
+    }
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
