@@ -81,9 +81,11 @@ jobs:
 
   evaluate:
     name: Evaluate Deployment Health
+    needs: validate_assets
     if: |
-      github.event_name == 'workflow_dispatch' || 
-      (github.event_name == 'push' && github.ref == 'refs/heads/feat/post-deployment')
+      always() && 
+      (needs.validate_assets.result == 'success' || needs.validate_assets.result == 'skipped') &&
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/post-deployment'))
     runs-on: [self-hosted, macOS]
     timeout-minutes: 15
     steps:
