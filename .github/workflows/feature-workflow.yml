@@ -39,21 +39,27 @@ jobs:
         run: |
           set -euo pipefail
           # Tìm các file thay đổi trong specs/, loại bỏ các file có chứa -baseline.yaml hoặc BASELINE.yaml
-          mapfile -t SPECS < <(git diff --name-only HEAD^ HEAD | grep "applications/.*/specs/.*\.yaml" | grep -ivE "(-baseline|baseline)\.yaml" || true)
-          
-          if [ "${#SPECS[@]}" -ne 1 ]; then
+          SPECS="$(git diff --name-only HEAD^ HEAD | grep "applications/.*/specs/.*\.yaml" | grep -ivE "(-baseline|baseline)\.yaml" || true)"
+          SPEC_COUNT=$(printf '%s\n' "${SPECS}" | sed '/^$/d' | wc -l | tr -d ' ')
+
+          if [ "${SPEC_COUNT}" -ne 1 ]; then
             echo "Expected exactly one changed spec file (excluding BASELINE.yaml) for feat/* workflow:"
-            printf '%s\n' "${SPECS[@]}"
+            printf '%s\n' "${SPECS}"
             exit 1
           fi
-          
-          SPEC_FILE="${SPECS[0]}"
+
+          SPEC_FILE="$(printf '%s\n' "${SPECS}" | sed '/^$/d' | head -n 1)"
           echo "Found spec file: $SPEC_FILE"
           echo "spec_file=$SPEC_FILE" >> "$GITHUB_OUTPUT"
           
           # Trích xuất RELEASE_ID từ tên file (ví dụ: PURCHASE-manager-approval.yaml -> PURCHASE-manager-approval)
           RELEASE_ID=$(basename "$SPEC_FILE" .yaml)
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+          APP_PATH="$(python3 -c "from pathlib import Path; print(Path('${SPEC_FILE}').parents[1].as_posix())")"
+          MANIFEST_PATH="$(python3 -c "from pathlib import Path; print('devops/k8s/' + Path('${SPEC_FILE}').parents[1].name)")"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "manifest_path=$MANIFEST_PATH" >> "$GITHUB_OUTPUT"
 
   validate_spec:
     runs-on: [self-hosted, macOS]
