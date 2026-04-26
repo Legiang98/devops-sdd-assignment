@@ -1,0 +1,12 @@
+service: invoice-workflow-service
+feature: faulty-feature
+description: A feature that will cause the service to crash for demo purposes.
+change_id: demo-faulty-id
+
+endpoints:
+  - path: /invoices/faulty
+    method: POST
+    description: This endpoint will never be reached because the app will crash.
+    responses:
+      200:
+        description: Success
