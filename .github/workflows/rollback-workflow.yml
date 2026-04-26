@@ -2,7 +2,7 @@ name: Rollback Workflow
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
   issue_comment:
     types: [created]
 
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: rollback-${{ github.event.issue.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   plan_rollback:
