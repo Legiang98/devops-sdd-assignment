@@ -1,4 +1,4 @@
 # Auto-updated by CI pipeline.
 image:
   repository: invoice-workflow-service
-  tag: v1
+  tag: 0df415edb507
