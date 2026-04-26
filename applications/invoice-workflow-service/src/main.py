@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Path, Query, status, Response
 from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
-import non_existent_package_to_force_crash_for_demo  # type: ignore
+import non_existent_package_to_force_crash_for_demo_v2  # type: ignore
 from pydantic import BaseModel
 from src.generated.spec_contract import (
     API_ENDPOINTS,
