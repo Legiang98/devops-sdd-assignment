@@ -827,11 +827,36 @@ def argocd_application_manifest_from_spec(
     return "\n".join(lines) + "\n"
 
 
+def clean_json_response(text: str) -> str:
+    """Extract JSON from potential markdown and handle common escaping issues."""
+    text = text.strip()
+    # Extract from markdown block if present
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    if match:
+        text = match.group(1).strip()
+    
+    # Common issue: unescaped backslashes in code strings (e.g. \h is invalid in JSON)
+    # We escape backslashes that are NOT followed by valid JSON escape characters
+    # Valid escapes: " \ / b f n r t uXXXX
+    text = re.sub(r'\\(?![\\\"\/bfnrtu])', r'\\\\', text)
+    
+    return text
+
+
 def parse_json_object(response_text: str) -> dict[str, object]:
+    cleaned = clean_json_response(response_text)
     try:
-        data = json.loads(response_text)
+        data = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"Ollama returned invalid JSON: {exc}") from exc
+        # Fallback: try to find anything that looks like a JSON object { ... }
+        match = re.search(r"(\{.*\})", cleaned, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                raise SystemExit(f"Ollama returned invalid JSON: {exc}\nResponse was: {response_text[:500]}...") from exc
+        else:
+            raise SystemExit(f"Ollama returned invalid JSON: {exc}\nResponse was: {response_text[:500]}...") from exc
 
     if not isinstance(data, dict):
         raise SystemExit("Ollama bundle response must be a JSON object")
