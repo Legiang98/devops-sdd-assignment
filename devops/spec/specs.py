@@ -37,6 +37,19 @@ def _default_workspace(spec_path: Path) -> dict[str, str]:
     }
 
 
+def _find_baseline_spec(spec_path: Path) -> Path | None:
+    specs_dir = spec_path.parent
+    exact_baseline = specs_dir / "BASELINE.yaml"
+    if exact_baseline.exists() and exact_baseline.resolve() != spec_path.resolve():
+        return exact_baseline
+
+    candidates = sorted(specs_dir.glob("*BASELINE*.y*ml"))
+    for candidate in candidates:
+        if candidate.resolve() != spec_path.resolve():
+            return candidate
+    return None
+
+
 def _merge_api_endpoints(
     base_spec: dict[str, Any],
     feature_spec: dict[str, Any],
@@ -98,9 +111,9 @@ def load_resolved_spec(spec_path: Path) -> dict[str, Any]:
     if not isinstance(raw_spec, dict):
         raise SystemExit(f"Expected mapping YAML in spec: {spec_path}")
 
-    baseline_candidate = spec_path.with_name("BASELINE.yaml")
+    baseline_candidate = _find_baseline_spec(spec_path)
     merged_spec = raw_spec
-    if baseline_candidate.exists() and baseline_candidate.resolve() != spec_path.resolve():
+    if baseline_candidate is not None:
         baseline_spec = yaml.safe_load(baseline_candidate.read_text(encoding="utf-8")) or {}
         if not isinstance(baseline_spec, dict):
             raise SystemExit(f"Expected mapping YAML in baseline spec: {baseline_candidate}")

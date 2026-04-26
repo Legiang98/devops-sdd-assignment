@@ -1,0 +1,39 @@
+schema_version: 1.0.0
+change_id: INV-FINANCE-APPROVAL
+service: invoice-workflow-service
+summary: Add finance approval stage for invoices >= 5000
+owner: finance-ops
+risk_tier: medium
+
+intent:
+  business_outcome: Require finance review for high-value invoices before final approval.
+  non_goals:
+    - No infrastructure migration
+    - No schema change
+
+workflow_change:
+  new_stage:
+    name: finance
+    required_when:
+      amount_gte: 5000
+
+api_contract:
+  endpoints:
+    - method: POST
+      path: /invoices/{invoice_id}/approve
+
+quality:
+  unit_tests:
+    required: true
+    min_new_tests: 2
+    focus_areas:
+      - invoice_creation
+      - approval_thresholds
+
+observability_assertions:
+  - metric: approval_step_required_total
+    labels:
+      step: finance
+    expected_behavior: increment only for invoices >= 5000
+  - metric: expense_approved_total
+    expected_behavior: increment when all required stages complete

@@ -111,7 +111,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: manifests-${{ github.run_id }}
-          path: ${{ steps.detect.outputs.manifest_dir }}
+          path: devops/k8s/
 
   approve:
     name: Manual Approval
@@ -148,7 +148,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: manifests-${{ github.run_id }}
-          path: .
+          path: devops/k8s/
 
       - name: Push to Git
         env:
@@ -156,7 +156,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${{ needs.build.outputs.manifest_dir }}"
+          git add "devops/k8s/${{ needs.build.outputs.app_name }}"
           
           if git diff --cached --quiet; then
             echo "No changes to commit"
