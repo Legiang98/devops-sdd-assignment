@@ -87,6 +87,10 @@ class GenerateGitOpsTests(unittest.TestCase):
                 post_deploy_job["metadata"]["annotations"]["argocd.argoproj.io/hook"],
                 "PostSync",
             )
+            self.assertEqual(
+                post_deploy_job["metadata"]["annotations"]["devops.ssd/change-id"],
+                "BASELINE",
+            )
             self.assertEqual(argocd_application["kind"], "Application")
             self.assertEqual(argocd_application["metadata"]["name"], "invoice-workflow-service")
             self.assertEqual(
@@ -99,6 +103,12 @@ class GenerateGitOpsTests(unittest.TestCase):
                 for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
                 if env["name"] == "GITHUB_TOKEN"
             )
+            current_version_env = next(
+                env
+                for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
+                if env["name"] == "CURRENT_VERSION"
+            )
+            self.assertEqual(current_version_env["value"], "BASELINE")
             self.assertEqual(token_env["valueFrom"]["secretKeyRef"]["name"], "gha-post-deployment-trigger")
             self.assertEqual(token_env["valueFrom"]["secretKeyRef"]["key"], "pat")
             workflow_ref_env = next(

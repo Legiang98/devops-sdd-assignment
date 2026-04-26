@@ -347,6 +347,7 @@ def render_post_deploy_evaluation_job(
             "annotations": {
                 "argocd.argoproj.io/hook": "PostSync",
                 "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
+                "devops.ssd/change-id": change_id,
             },
         },
         "spec": {
@@ -369,7 +370,7 @@ def render_post_deploy_evaluation_job(
                                 {"name": "APP_NAMESPACE", "value": namespace},
                                 {"name": "APP_LABEL", "value": workload_name},
                                 {"name": "CHANGE_ID", "value": change_id},
-                                {"name": "CURRENT_VERSION", "value": "latest"},
+                                {"name": "CURRENT_VERSION", "value": change_id},
                                 {"name": "PREVIOUS_HEALTHY_VERSION", "value": "unknown"},
                                 {"name": "ARGOCD_APP_NAME", "value": app_slug_value},
                                 {
