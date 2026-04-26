@@ -1,9 +1,7 @@
 """Auto-generated service module from spec. Do not edit manually."""
 
-from fastapi import FastAPI
-from fastapi.responses import Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
-
+from fastapi import FastAPI, HTTPException, Path, Query, status
+from pydantic import BaseModel
 from src.generated.spec_contract import (
     API_ENDPOINTS,
     BASELINE_STAGES,
@@ -36,9 +34,8 @@ def health() -> dict[str, object]:
         "api_endpoints": API_ENDPOINTS,
     }
 
-
 @app.post("/invoices")
-def endpoint_0(payload: dict[str, object] | None = None) -> dict[str, object]:
+def create_invoice(payload: dict[str, object] | None = None) -> dict[str, object]:
     return {
         "change_id": CHANGE_ID,
         "service": SERVICE,
@@ -49,7 +46,7 @@ def endpoint_0(payload: dict[str, object] | None = None) -> dict[str, object]:
     }
 
 @app.get("/invoices/{invoice_id}")
-def endpoint_1_path(invoice_id: str) -> dict[str, object]:
+def get_invoice(invoice_id: str = Path(..., title="ID of the invoice to retrieve")) -> dict[str, object]:
     return {
         "change_id": CHANGE_ID,
         "service": SERVICE,
@@ -59,7 +56,7 @@ def endpoint_1_path(invoice_id: str) -> dict[str, object]:
     }
 
 @app.post("/invoices/{invoice_id}/approve")
-def endpoint_2_path(invoice_id: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+def approve_invoice(invoice_id: str = Path(..., title="ID of the invoice to approve"), payload: dict[str, object] | None = None) -> dict[str, object]:
     return {
         "change_id": CHANGE_ID,
         "service": SERVICE,
@@ -68,7 +65,6 @@ def endpoint_2_path(invoice_id: str, payload: dict[str, object] | None = None) -
         "payload": payload or {},
         "message": "Generated endpoint placeholder", "path_params": {"invoice_id": invoice_id},
     }
-
 
 @app.get("/metrics")
 def metrics() -> Response:
