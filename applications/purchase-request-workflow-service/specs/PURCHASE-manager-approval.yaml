@@ -37,3 +37,4 @@ observability_assertions:
     expected_behavior: increment only for purchase requests >= 1000
   - metric: purchase_request_approved_total
     expected_behavior: increment when all required stages complete
+# test

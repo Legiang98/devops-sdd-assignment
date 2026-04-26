@@ -136,7 +136,7 @@ def expected_contract(spec: dict) -> dict[str, object]:
         ),
         "api_endpoints": endpoints,
         "reject_endpoint_enabled": any(
-            e == "POST /expenses/{expense_id}/reject" for e in endpoints
+            e.startswith("POST ") and e.endswith("/reject") for e in endpoints
         ),
     }
 
@@ -851,12 +851,13 @@ def validate_app_source_against_spec(app_source: str, spec: dict) -> list[str]:
         if route not in routes:
             violations.append(f"generated app missing route {route[0]} {route[1]}")
 
-    reject_expected = any(
-        str(endpoint["method"]).upper() == "POST"
-        and endpoint["path"] == "/expenses/{expense_id}/reject"
+    reject_routes = {
+        (str(endpoint["method"]).upper(), endpoint["path"])
         for endpoint in spec.get("api_contract", {}).get("endpoints", [])
-    )
-    has_reject = ("POST", "/expenses/{expense_id}/reject") in routes
+        if str(endpoint["method"]).upper() == "POST" and str(endpoint["path"]).endswith("/reject")
+    }
+    reject_expected = bool(reject_routes)
+    has_reject = any(method == "POST" and path.endswith("/reject") for method, path in routes)
     if has_reject != reject_expected:
         violations.append("generated app reject route does not match spec")
     return violations
@@ -1181,8 +1182,11 @@ def main() -> None:
         app_source = src_files["main.py"]
         app_violations = validate_app_source_against_spec(app_source, spec)
         if app_violations:
-            src_files = {"main.py": app_module_body_from_contract(contract)}
-            app_source = app_module_body_from_contract(contract)
+            if service == "expense-workflow":
+                app_source = app_module_body_from_contract(contract)
+            else:
+                app_source = generic_app_module_body(contract, service.replace("-", " ").title())
+            src_files = {"main.py": app_source}
             app_codegen_provider = "ollama-validated-fallback"
         else:
             app_codegen_provider = "ollama"
