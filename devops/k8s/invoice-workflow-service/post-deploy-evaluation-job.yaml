@@ -31,7 +31,7 @@ spec:
         - name: CURRENT_VERSION
           value: 01b6028f0296
         - name: PREVIOUS_HEALTHY_VERSION
-          value: unknown
+          value: v1
         - name: ARGOCD_APP_NAME
           value: invoice-workflow-service
         - name: GITHUB_TOKEN

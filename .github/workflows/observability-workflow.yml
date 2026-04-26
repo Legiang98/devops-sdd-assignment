@@ -142,11 +142,11 @@ jobs:
               "app_label": os.environ["APP_LABEL"],
               "change_id": os.environ["CHANGE_ID"],
               "current_version": resolved["current"]["version"],
-              "previous_version": resolved["previous"]["version"] if resolved.get("previous") else "unknown",
+              "previous_version": resolved["previous"]["version"] if resolved.get("previous") else "v1",
               "previous_healthy_version": (
                   resolved["last_known_healthy"]["version"]
                   if resolved.get("last_known_healthy")
-                  else "unknown"
+                  else "v1"
               ),
               "previous_healthy_source": resolved["last_known_healthy_source"],
               "argocd_app_name": os.environ["APP_NAME"],
