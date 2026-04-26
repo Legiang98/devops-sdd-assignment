@@ -10,7 +10,13 @@ DEFAULT_MANIFEST_TOGGLES = {
     "service.yaml": True,
     "ingress.yaml": True,
     "image-tag.yaml": True,
+    "post-deploy-evaluation-job.yaml": True,
 }
+
+ARGOCD_NAMESPACE = "argocd"
+POST_DEPLOY_TRIGGER_SECRET_NAME = "gha-post-deployment-trigger"
+POST_DEPLOY_TRIGGER_SECRET_KEY = "pat"
+OBSERVABILITY_WORKFLOW_REF = "feat/post-deployment"
 
 
 def parse_args():
@@ -148,6 +154,14 @@ def replica_count(baseline_spec: dict) -> int:
 
 def ingress_host(app_slug_value: str) -> str:
     return f"{app_slug_value}.local"
+
+
+def change_id_value(baseline_spec: dict) -> str:
+    return str(baseline_spec.get("change_id", "BASELINE"))
+
+
+def health_endpoint(workload_name: str, namespace: str) -> str:
+    return f"http://{workload_name}.{namespace}.svc.cluster.local/health"
 
 
 def render_namespace(namespace: str) -> dict:
@@ -300,6 +314,117 @@ def render_image_tag(app_slug_value: str) -> str:
     )
 
 
+def render_post_deploy_evaluation_job(
+    namespace: str,
+    app_slug_value: str,
+    workload_name: str,
+    change_id: str,
+) -> dict:
+    workflow_url = (
+        "https://api.github.com/repos/Legiang98/devops-sdd-assignment/"
+        "actions/workflows/observability-workflow.yml/dispatches"
+    )
+    return {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": f"{app_slug_value}-post-deploy-evaluation",
+            "namespace": ARGOCD_NAMESPACE,
+            "annotations": {
+                "argocd.argoproj.io/hook": "PostSync",
+                "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
+            },
+        },
+        "spec": {
+            "ttlSecondsAfterFinished": 600,
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app.kubernetes.io/name": app_slug_value,
+                        "app.kubernetes.io/component": "post-deploy-evaluation",
+                    }
+                },
+                "spec": {
+                    "restartPolicy": "Never",
+                    "containers": [
+                        {
+                            "name": "trigger-observability",
+                            "image": "curlimages/curl:8.7.1",
+                            "env": [
+                                {"name": "SERVICE_NAME", "value": app_slug_value},
+                                {"name": "APP_NAMESPACE", "value": namespace},
+                                {"name": "APP_LABEL", "value": workload_name},
+                                {"name": "CHANGE_ID", "value": change_id},
+                                {"name": "CURRENT_VERSION", "value": "latest"},
+                                {"name": "PREVIOUS_HEALTHY_VERSION", "value": "unknown"},
+                                {"name": "ARGOCD_APP_NAME", "value": app_slug_value},
+                                {
+                                    "name": "GITHUB_TOKEN",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": POST_DEPLOY_TRIGGER_SECRET_NAME,
+                                            "key": POST_DEPLOY_TRIGGER_SECRET_KEY,
+                                        }
+                                    },
+                                },
+                                {
+                                    "name": "HEALTH_ENDPOINT",
+                                    "value": health_endpoint(workload_name, namespace),
+                                },
+                                {
+                                    "name": "OBSERVABILITY_WORKFLOW_URL",
+                                    "value": workflow_url,
+                                },
+                                {
+                                    "name": "OBSERVABILITY_WORKFLOW_REF",
+                                    "value": OBSERVABILITY_WORKFLOW_REF,
+                                },
+                            ],
+                            "command": ["/bin/sh", "-ec"],
+                            "args": [
+                                "\n".join(
+                                    [
+                                        'test -n "${GITHUB_TOKEN}"',
+                                        'cat > /tmp/dispatch.json <<EOF',
+                                        "{",
+                                        '  "ref": "${OBSERVABILITY_WORKFLOW_REF}",',
+                                        '  "inputs": {',
+                                        '    "service_name": "${SERVICE_NAME}",',
+                                        '    "namespace": "${APP_NAMESPACE}",',
+                                        '    "app_label": "${APP_LABEL}",',
+                                        '    "change_id": "${CHANGE_ID}",',
+                                        '    "current_version": "${CURRENT_VERSION}",',
+                                        '    "previous_healthy_version": "${PREVIOUS_HEALTHY_VERSION}",',
+                                        '    "argocd_app_name": "${ARGOCD_APP_NAME}",',
+                                        '    "health_endpoint": "${HEALTH_ENDPOINT}"',
+                                        "  }",
+                                        "}",
+                                        "EOF",
+                                        'http_code=$(curl -sS -o /tmp/dispatch-response.txt -w "%{http_code}" \\',
+                                        '  -X POST \\',
+                                        '  -H "Accept: application/vnd.github+json" \\',
+                                        '  -H "Authorization: Bearer ${GITHUB_TOKEN}" \\',
+                                        '  -H "X-GitHub-Api-Version: 2022-11-28" \\',
+                                        '  "${OBSERVABILITY_WORKFLOW_URL}" \\',
+                                        '  --data @/tmp/dispatch.json)',
+                                        'if [ "${http_code}" != "204" ]; then',
+                                        '  cat /tmp/dispatch-response.txt',
+                                        '  echo "GitHub workflow dispatch failed with status ${http_code}"',
+                                        '  exit 1',
+                                        "fi",
+                                        'echo "Triggered observability workflow for ${SERVICE_NAME} (${CHANGE_ID}) on ref ${OBSERVABILITY_WORKFLOW_REF}"',
+                                    ]
+                                )
+                            ],
+                        }
+                    ],
+                },
+            },
+            "backoffLimit": 1,
+        },
+    }
+
+
 def build_manifest_bundle(app_root: Path, baseline_spec: dict) -> dict[str, str]:
     toggles = manifest_toggles(baseline_spec)
     app_slug_value = app_slug(app_root, baseline_spec)
@@ -310,6 +435,7 @@ def build_manifest_bundle(app_root: Path, baseline_spec: dict) -> dict[str, str]
     svc_port = service_port(baseline_spec)
     svc_target_port = target_port(baseline_spec)
     replicas = replica_count(baseline_spec)
+    change_id = change_id_value(baseline_spec)
 
     manifest_bundle = {
         "namespace.yaml": dump_yaml(render_namespace(namespace)),
@@ -341,6 +467,14 @@ def build_manifest_bundle(app_root: Path, baseline_spec: dict) -> dict[str, str]
             )
         ),
         "image-tag.yaml": render_image_tag(app_slug_value),
+        "post-deploy-evaluation-job.yaml": dump_yaml(
+            render_post_deploy_evaluation_job(
+                namespace=namespace,
+                app_slug_value=app_slug_value,
+                workload_name=workload_name,
+                change_id=change_id,
+            )
+        ),
     }
     return {
         filename: content

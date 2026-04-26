@@ -1,0 +1,188 @@
+name: Post-Deployment Observability
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Name of the service to monitor"
+        required: true
+        default: "expense-workflow-service"
+      namespace:
+        description: "K8s namespace"
+        required: true
+        default: "devops-ssd-assignment"
+      app_label:
+        description: "App label for log filtering"
+        required: true
+        default: "expense-workflow-service"
+      change_id:
+        description: "The change ID being evaluated"
+        required: true
+      current_version:
+        description: "Current deployed SHA"
+        required: true
+      previous_healthy_version:
+        description: "Last known healthy SHA"
+        required: true
+      argocd_app_name:
+        description: "ArgoCD Application Name"
+        required: true
+      loki_url:
+        description: "Loki API URL"
+        required: false
+        default: "http://loki.observability.svc.cluster.local:3100"
+      health_endpoint:
+        description: "Service health check URL"
+        required: true
+        default: "http://localhost:8080/health"
+  push:
+    branches:
+      - dev
+      - feat/post-deployment
+    paths:
+      - ".github/workflows/observability-workflow.yml"
+      - "devops/observability/**"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: observability-${{ github.event.inputs.argocd_app_name }}-${{ github.event.inputs.change_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate_assets:
+    name: Validate Observability Assets
+    if: github.event_name == 'push'
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+
+      - name: Validate Python Syntax
+        run: |
+          python3 -m py_compile devops/observability/monitor_agent.py
+
+      - name: Check Evidence Collector Is Executable
+        run: |
+          test -f devops/observability/collect_evidence.sh
+          test -x devops/observability/collect_evidence.sh
+
+  evaluate:
+    name: Evaluate Deployment Health
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+
+      - name: Prepare Evidence Directory
+        run: mkdir -p ./evidence
+
+      - name: Record Deployment Context
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = {
+              "service_name": "${{ github.event.inputs.service_name }}",
+              "namespace": "${{ github.event.inputs.namespace }}",
+              "app_label": "${{ github.event.inputs.app_label }}",
+              "change_id": "${{ github.event.inputs.change_id }}",
+              "current_version": "${{ github.event.inputs.current_version }}",
+              "previous_healthy_version": "${{ github.event.inputs.previous_healthy_version }}",
+              "argocd_app_name": "${{ github.event.inputs.argocd_app_name }}",
+              "loki_url": "${{ github.event.inputs.loki_url }}",
+              "health_endpoint": "${{ github.event.inputs.health_endpoint }}",
+              "trigger": "workflow_dispatch",
+              "workflow_run_id": "${{ github.run_id }}",
+          }
+          Path("./evidence/deployment_context.json").write_text(
+              json.dumps(payload, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Collect Evidence
+        run: |
+          chmod +x devops/observability/collect_evidence.sh
+          devops/observability/collect_evidence.sh \
+            "${{ github.event.inputs.service_name }}" \
+            "${{ github.event.inputs.namespace }}" \
+            "${{ github.event.inputs.app_label }}" \
+            "${{ github.event.inputs.loki_url }}" \
+            "${{ github.event.inputs.health_endpoint }}" \
+            "./evidence"
+
+      - name: Run AI Monitoring Agent
+        id: monitor
+        run: |
+          python3 devops/observability/monitor_agent.py \
+            --evidence-dir "./evidence" \
+            --service "${{ github.event.inputs.service_name }}"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          analysis = json.loads(Path("./evidence/analysis_result.json").read_text(encoding="utf-8"))
+          with Path("${GITHUB_OUTPUT}").open("a", encoding="utf-8") as handle:
+              handle.write(f"recommendation={analysis['recommendation']}\n")
+              handle.write(f"severity={analysis['severity']}\n")
+          PY
+
+      - name: Upload Evidence Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-evidence-${{ github.event.inputs.change_id }}
+          path: ./evidence/
+
+      - name: Create Rollback Recommendation Issue
+        if: steps.monitor.outputs.recommendation == 'rollback'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.FINE_GRAINED_PAT }}
+          script: |
+            const fs = require('fs');
+            const analysis = JSON.parse(fs.readFileSync('./evidence/analysis_result.json', 'utf8'));
+            const inputs = context.payload.inputs;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ [Rollback Recommended] ${inputs.service_name} - ${inputs.change_id}`,
+              labels: ['rollback-needed', 'observability-alert'],
+              body: `
+              ## 🚩 Rollback Recommendation
+              
+              Anomalies detected after deployment **${inputs.change_id}**.
+              
+              - **Service:** ${inputs.service_name}
+              - **ArgoCD Application:** ${inputs.argocd_app_name}
+              - **Current Version:** \`${inputs.current_version}\`
+              - **Previous Healthy Version:** \`${inputs.previous_healthy_version}\`
+              - **Severity:** ${analysis.severity.toUpperCase()}
+              
+              ### 📝 AI Analysis Summary
+              > ${analysis.reason}
+              
+              ### Evidence
+              - Health endpoint: \`${inputs.health_endpoint}\`
+              - Loki query target: \`${inputs.loki_url}\`
+
+              **Detailed Points**
+              ${analysis.analysis}
+              
+              ---
+              **Action Required:**
+              Review the uploaded evidence artifacts and use the rollback approval flow if you agree with the recommendation.
+              `
+            });

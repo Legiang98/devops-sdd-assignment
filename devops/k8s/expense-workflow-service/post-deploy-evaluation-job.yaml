@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: expense-workflow-service-post-deploy-evaluation
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: expense-workflow-service
+        app.kubernetes.io/component: post-deploy-evaluation
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: trigger-observability
+        image: curlimages/curl:8.7.1
+        env:
+        - name: SERVICE_NAME
+          value: expense-workflow-service
+        - name: APP_NAMESPACE
+          value: devops-ssd-assignment
+        - name: APP_LABEL
+          value: expense-workflow-service
+        - name: CHANGE_ID
+          value: BASELINE
+        - name: CURRENT_VERSION
+          value: latest
+        - name: PREVIOUS_HEALTHY_VERSION
+          value: unknown
+        - name: ARGOCD_APP_NAME
+          value: expense-workflow-service
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gha-post-deployment-trigger
+              key: pat
+        - name: HEALTH_ENDPOINT
+          value: http://expense-workflow-service.devops-ssd-assignment.svc.cluster.local/health
+        - name: OBSERVABILITY_WORKFLOW_URL
+          value: https://api.github.com/repos/Legiang98/devops-sdd-assignment/actions/workflows/observability-workflow.yml/dispatches
+        - name: OBSERVABILITY_WORKFLOW_REF
+          value: feat/post-deployment
+        command:
+        - /bin/sh
+        - -ec
+        args:
+        - |
+          test -n "${GITHUB_TOKEN}"
+          cat > /tmp/dispatch.json <<EOF
+          {
+            "ref": "${OBSERVABILITY_WORKFLOW_REF}",
+            "inputs": {
+              "service_name": "${SERVICE_NAME}",
+              "namespace": "${APP_NAMESPACE}",
+              "app_label": "${APP_LABEL}",
+              "change_id": "${CHANGE_ID}",
+              "current_version": "${CURRENT_VERSION}",
+              "previous_healthy_version": "${PREVIOUS_HEALTHY_VERSION}",
+              "argocd_app_name": "${ARGOCD_APP_NAME}",
+              "health_endpoint": "${HEALTH_ENDPOINT}"
+            }
+          }
+          EOF
+          http_code=$(curl -sS -o /tmp/dispatch-response.txt -w "%{http_code}" \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${OBSERVABILITY_WORKFLOW_URL}" \
+            --data @/tmp/dispatch.json)
+          if [ "${http_code}" != "204" ]; then
+            cat /tmp/dispatch-response.txt
+            echo "GitHub workflow dispatch failed with status ${http_code}"
+            exit 1
+          fi
+          echo "Triggered observability workflow for ${SERVICE_NAME} (${CHANGE_ID}) on ref ${OBSERVABILITY_WORKFLOW_REF}"
+  backoffLimit: 1

@@ -59,6 +59,7 @@ class GenerateGitOpsTests(unittest.TestCase):
             complete_before, missing_before = manifest_status(output_dir, baseline_spec)
             self.assertFalse(complete_before)
             self.assertIn("service.yaml", missing_before)
+            self.assertIn("post-deploy-evaluation-job.yaml", missing_before)
 
             written_files = scaffold_manifests(output_dir, build_manifest_bundle(app_root, baseline_spec))
 
@@ -71,6 +72,30 @@ class GenerateGitOpsTests(unittest.TestCase):
 
             ingress = yaml.safe_load((output_dir / "ingress.yaml").read_text(encoding="utf-8"))
             self.assertEqual(ingress["spec"]["rules"][0]["host"], "invoice-workflow-service.local")
+            post_deploy_job = yaml.safe_load(
+                (output_dir / "post-deploy-evaluation-job.yaml").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                post_deploy_job["metadata"]["annotations"]["argocd.argoproj.io/hook"],
+                "PostSync",
+            )
+            self.assertEqual(post_deploy_job["metadata"]["namespace"], "argocd")
+            token_env = next(
+                env
+                for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
+                if env["name"] == "GITHUB_TOKEN"
+            )
+            self.assertEqual(token_env["valueFrom"]["secretKeyRef"]["name"], "gha-post-deployment-trigger")
+            self.assertEqual(token_env["valueFrom"]["secretKeyRef"]["key"], "pat")
+            workflow_ref_env = next(
+                env
+                for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
+                if env["name"] == "OBSERVABILITY_WORKFLOW_REF"
+            )
+            self.assertEqual(workflow_ref_env["value"], "feat/post-deployment")
+            dispatch_script = post_deploy_job["spec"]["template"]["spec"]["containers"][0]["args"][0]
+            self.assertIn('Authorization: Bearer ${GITHUB_TOKEN}', dispatch_script)
+            self.assertIn('"ref": "${OBSERVABILITY_WORKFLOW_REF}"', dispatch_script)
 
     def test_ingress_can_be_disabled(self):
         baseline_spec = {
@@ -104,7 +129,13 @@ class GenerateGitOpsTests(unittest.TestCase):
             self.assertNotIn("ingress.yaml", manifest_bundle)
             self.assertEqual(
                 required_manifest_files(baseline_spec),
-                ["namespace.yaml", "deployment.yaml", "service.yaml", "image-tag.yaml"],
+                [
+                    "namespace.yaml",
+                    "deployment.yaml",
+                    "service.yaml",
+                    "image-tag.yaml",
+                    "post-deploy-evaluation-job.yaml",
+                ],
             )
 
             written_files = scaffold_manifests(output_dir, manifest_bundle)
