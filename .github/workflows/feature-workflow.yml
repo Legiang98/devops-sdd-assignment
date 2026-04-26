@@ -18,7 +18,6 @@ env:
 
 jobs:
   scan_spec:
-    if: ${{ !contains(github.event.head_commit.message, '[skip feat workflow]') }}
     runs-on: [self-hosted, macOS]
     outputs:
       spec_file: ${{ steps.scan.outputs.spec_file }}
