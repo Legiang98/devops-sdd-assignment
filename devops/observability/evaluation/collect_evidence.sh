@@ -11,6 +11,11 @@ OUTPUT_DIR=$7
 
 mkdir -p "$OUTPUT_DIR"
 
+# Tự động trích xuất Base Name để query linh hoạt hơn
+# Ví dụ: expense-workflow-service -> expense-workflow
+BASE_NAME=$(echo "$APP_LABEL" | sed -E 's/-(service|app|deployment|pod|container)$//')
+echo "[*] Derived Base Name: $BASE_NAME (from $APP_LABEL)"
+
 echo "[*] Collecting Health Status from $HEALTH_URL..."
 HEALTH_BODY_PATH="$OUTPUT_DIR/health_response_body.txt"
 health_http_code=$(curl -sS --connect-timeout 5 -o "$HEALTH_BODY_PATH" -w "%{http_code}" "$HEALTH_URL" || true)
@@ -37,13 +42,13 @@ PY
 fi
 
 echo "[*] Querying Prometheus (kube-state-metrics) for infra signals..."
-# Truy vấn linh hoạt hơn bằng cách tìm kiếm từ khóa trong tên Pod
-PROM_QUERY="sum by (reason, pod) (kube_pod_container_status_terminated_reason{namespace=\"$NAMESPACE\", pod=~\".*$APP_LABEL.*\"}) or sum by (reason, pod) (kube_pod_container_status_waiting_reason{namespace=\"$NAMESPACE\", pod=~\".*$APP_LABEL.*\"})"
+# Truy vấn linh hoạt hơn bằng cách dùng BASE_NAME
+PROM_QUERY="sum by (reason, pod) (kube_pod_container_status_terminated_reason{namespace=\"$NAMESPACE\", pod=~\".*$BASE_NAME.*\"}) or sum by (reason, pod) (kube_pod_container_status_waiting_reason{namespace=\"$NAMESPACE\", pod=~\".*$BASE_NAME.*\"})"
 
 curl -G -s "$PROMETHEUS_URL/api/v1/query" --data-urlencode "query=$PROM_QUERY" > "$OUTPUT_DIR/prometheus_infra_signals.json" || echo '{"status":"error"}' > "$OUTPUT_DIR/prometheus_infra_signals.json"
 
-echo "[*] Querying Loki logs for $APP_LABEL..."
-LOKI_QUERY="{namespace=\"$NAMESPACE\",pod=~\"$APP_LABEL.*\"}"
+echo "[*] Querying Loki logs for $BASE_NAME..."
+LOKI_QUERY="{namespace=\"$NAMESPACE\",pod=~\".*$BASE_NAME.*\"}"
 LOKI_RESPONSE_PATH="$OUTPUT_DIR/loki_response.json"
 query_end_ns=$(($(date +%s) * 1000000000))
 query_start_ns=$((query_end_ns - 3600 * 1000000000))
@@ -75,15 +80,20 @@ PY
   then
     echo "[*] Loki logs collected via API"
   else
-    echo "[*] Loki query returned no log lines, falling back to kubectl logs..."
-    kubectl logs -n "$NAMESPACE" -l "app.kubernetes.io/name=$APP_LABEL" --tail=200 > "$OUTPUT_DIR/loki_logs.txt" 2>/dev/null || echo "No logs" > "$OUTPUT_DIR/loki_logs.txt"
+    # Fallback: Lấy log từ kubectl nếu Loki rỗng
+    kubectl logs -n "$NAMESPACE" -l "app.kubernetes.io/name" --tail=200 2>/dev/null | grep -i "$BASE_NAME" > "$OUTPUT_DIR/loki_logs.txt" || echo "No logs found via kubectl" > "$OUTPUT_DIR/loki_logs.txt"
   fi
 else
   echo "[*] Loki query failed, falling back to kubectl logs..."
-  kubectl logs -n "$NAMESPACE" -l "app.kubernetes.io/name=$APP_LABEL" --tail=200 > "$OUTPUT_DIR/loki_logs.txt" 2>/dev/null || echo "No logs" > "$OUTPUT_DIR/loki_logs.txt"
+  kubectl logs -n "$NAMESPACE" -l "app.kubernetes.io/name" --tail=200 2>/dev/null | grep -i "$BASE_NAME" > "$OUTPUT_DIR/loki_logs.txt" || echo "No logs found via kubectl" > "$OUTPUT_DIR/loki_logs.txt"
 fi
 
 echo "[*] Optional: Collecting raw K8s Events for enrichment..."
-kubectl get events -n "$NAMESPACE" --field-selector involvedObject.kind=Pod -o json | jq "[.items[] | select(.involvedObject.name | contains(\"$APP_LABEL\"))] | .[0:10]" > "$OUTPUT_DIR/k8s_events_enrichment.json" || echo "[]" > "$OUTPUT_DIR/k8s_events_enrichment.json"
+kubectl get events -n "$NAMESPACE" --field-selector involvedObject.kind=Pod -o json | \
+  jq "[.items[] | select(.involvedObject.name | contains(\"$BASE_NAME\"))] | .[0:10]" > "$OUTPUT_DIR/k8s_events_enrichment.json" || echo "[]" > "$OUTPUT_DIR/k8s_events_enrichment.json"
+
+echo "[*] Optional: Collecting detailed Pod Status for enrichment..."
+kubectl get pods -n "$NAMESPACE" -o json | \
+  jq ".items | map(select(.metadata.name | contains(\"$BASE_NAME\")))" > "$OUTPUT_DIR/pod_status_enrichment.json" || echo "[]" > "$OUTPUT_DIR/pod_status_enrichment.json"
 
 echo "[*] Evidence collection complete in $OUTPUT_DIR"
