@@ -38,9 +38,22 @@ jobs:
         id: scan
         run: |
           set -euo pipefail
-          python3 scripts/feat_branch_scan.py \
-            --base-ref "origin/${FEAT_PR_BASE_BRANCH}" \
-            --github-output "$GITHUB_OUTPUT"
+          # Tìm các file thay đổi trong specs/, loại bỏ các file có chứa -baseline.yaml hoặc BASELINE.yaml
+          mapfile -t SPECS < <(git diff --name-only HEAD^ HEAD | grep "applications/.*/specs/.*\.yaml" | grep -ivE "(-baseline|baseline)\.yaml" || true)
+          
+          if [ "${#SPECS[@]}" -ne 1 ]; then
+            echo "Expected exactly one changed spec file (excluding BASELINE.yaml) for feat/* workflow:"
+            printf '%s\n' "${SPECS[@]}"
+            exit 1
+          fi
+          
+          SPEC_FILE="${SPECS[0]}"
+          echo "Found spec file: $SPEC_FILE"
+          echo "spec_file=$SPEC_FILE" >> "$GITHUB_OUTPUT"
+          
+          # Trích xuất RELEASE_ID từ tên file (ví dụ: PURCHASE-manager-approval.yaml -> PURCHASE-manager-approval)
+          RELEASE_ID=$(basename "$SPEC_FILE" .yaml)
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
   validate_spec:
     runs-on: [self-hosted, macOS]
