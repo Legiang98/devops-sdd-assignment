@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: rollback-${{ github.event.issue.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   plan_rollback:
