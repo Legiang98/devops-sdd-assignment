@@ -1,0 +1,4 @@
+# Auto-updated by CI pipeline.
+image:
+  repository: purchase-request-workflow-service
+  tag: 29ca70fe3309
