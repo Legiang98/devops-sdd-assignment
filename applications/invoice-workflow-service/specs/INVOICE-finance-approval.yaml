@@ -38,4 +38,4 @@ observability_assertions:
   - metric: expense_approved_total
     expected_behavior: increment when all required stages complete
 
-# test 7
+# test 8
