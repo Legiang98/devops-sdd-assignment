@@ -9,108 +9,102 @@ on:
       change_id:
         description: "The change ID to rollback"
         required: true
-      target_version:
-        description: "The target healthy version (optional, will attempt auto-resolve if unknown)"
-        required: false
-        default: "unknown"
-  issues:
-    types: [opened]
-  issue_comment:
-    types: [created]
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
 
+concurrency:
+  group: rollback-${{ github.event.inputs.service_name }}
+  cancel-in-progress: false
+
 jobs:
-  propose_rollback_plan:
-    name: Propose Rollback Plan
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'rollback-needed'))
+  plan_rollback:
+    name: Plan Rollback
     runs-on: [self-hosted, macOS]
+    outputs:
+      service_name: ${{ steps.plan.outputs.service_name }}
+      rollback_context: ${{ steps.plan.outputs.rollback_context }}
+      approval_body: ${{ steps.plan.outputs.approval_body }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          set-safe-directory: false
 
       - name: Resolve and Diff
         id: plan
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SERVICE_NAME="${{ github.event.inputs.service_name }}"
-            CHANGE_ID="${{ github.event.inputs.change_id }}"
-            
-            # Resolve healthy target
-            echo "Resolving rollback target for $SERVICE_NAME..."
-            RESULT=$(python3 devops/observability/evaluation/resolve_deployment_state.py resolve --app "$SERVICE_NAME")
-            
-            TARGET_TAG=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin)['last_known_healthy']['tag'])")
-            IMAGE_REPO=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin)['last_known_healthy']['repository'])")
-            MANIFEST_DIR="devops/k8s/$SERVICE_NAME"
-            
-            if [ "$TARGET_TAG" = "None" ] || [ -z "$TARGET_TAG" ]; then
-              echo "::error::No healthy target found for $SERVICE_NAME"
-              exit 1
-            fi
+          SERVICE_NAME="${{ github.event.inputs.service_name }}"
+          CHANGE_ID="${{ github.event.inputs.change_id }}"
+          
+          echo "Resolving rollback target for $SERVICE_NAME..."
+          RESULT=$(python3 devops/observability/evaluation/resolve_deployment_state.py resolve --app "$SERVICE_NAME")
+          
+          # Sử dụng Python script nhỏ để xử lý JSON an toàn
+          python3 - <<EOF
+          import json, sys, os
+          data = json.loads('''$RESULT''')
+          healthy = data.get('last_known_healthy')
+          
+          if not healthy:
+              print(f"::error::No healthy target found for $SERVICE_NAME")
+              sys.exit(1)
+              
+          target_tag = healthy['tag']
+          image_repo = healthy['repository']
+          manifest_dir = f"devops/k8s/$SERVICE_NAME"
+          
+          # Lưu outputs
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"service_name=$SERVICE_NAME\n")
+              f.write(f"target_tag={target_tag}\n")
+              
+              ctx = {
+                  'app_name': '$SERVICE_NAME',
+                  'service_name': '$SERVICE_NAME',
+                  'manifest_dir': manifest_dir,
+                  'image_repository': image_repo,
+                  'previous_healthy_tag': target_tag,
+                  'previous_healthy_version': healthy['version'],
+                  'current_version': data['current']['version'],
+                  'git_ref_name': 'dev',
+                  'change_id': '$CHANGE_ID'
+              }
+              f.write(f"rollback_context={json.dumps(ctx)}\n")
+              
+              # Tạo body cho Issue
+              body = [
+                  f"### 🛡️ Automated Rollback Proposal for $SERVICE_NAME",
+                  "",
+                  f"- Target Healthy Tag: \`{target_tag}\`",
+                  "- Reason: Detected instability in current deployment",
+                  "",
+                  "#### Please approve this issue to execute the rollback.",
+              ]
+              f.write("approval_body<<BT\n" + "\n".join(body) + "\nBT\n")
+          EOF
 
-            # Generate Diff
-            cp "$MANIFEST_DIR/image-tag.yaml" /tmp/old_tag.yaml
-            ./scripts/update_image_tag.sh "$MANIFEST_DIR" "$IMAGE_REPO" "$TARGET_TAG"
-            git diff "$MANIFEST_DIR/image-tag.yaml" > rollback.diff
-            mv /tmp/old_tag.yaml "$MANIFEST_DIR/image-tag.yaml"
-            
-            echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
-            echo "target_tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
-            
-            # Create context for the issue body
-            CONTEXT_JSON=$(echo "$RESULT" | python3 -c "import sys, json; d=json.load(sys.stdin); healthy=d['last_known_healthy']; out={'app_name':'$SERVICE_NAME','service_name':'$SERVICE_NAME','manifest_dir':'$MANIFEST_DIR','image_repository':healthy['repository'],'previous_healthy_tag':healthy['tag'],'previous_healthy_version':healthy['version'],'current_version':d['current']['version'],'git_ref_name':'dev','change_id':'$CHANGE_ID'}; print(json.dumps(out))")
-            echo "rollback_context=$CONTEXT_JSON" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create or Update Approval Issue
-        uses: actions/github-script@v7
+  approve_rollback:
+    name: Await Approval
+    needs: plan_rollback
+    runs-on: ubuntu-latest
+    steps:
+      - name: Manual Approval
+        uses: trstringer/manual-approval@v1
         with:
-          script: |
-            const fs = require('fs');
-            if (context.eventName === 'workflow_dispatch') {
-              const diff = fs.readFileSync('rollback.diff', 'utf8');
-              const rollbackContext = ${{ steps.plan.outputs.rollback_context }};
-              
-              const body = [
-                '### 🛡️ Automated Rollback Proposal',
-                '',
-                `- Service: \`${rollbackContext.service_name}\``,
-                `- Target Healthy Tag: \`${rollbackContext.previous_healthy_tag}\``,
-                '',
-                '#### Proposed Manifest Diff',
-                '```diff',
-                diff,
-                '```',
-                '',
-                'Please comment `/approve-rollback` to execute this revert.',
-                '',
-                '<!-- rollback-context',
-                JSON.stringify(rollbackContext),
-                '-->'
-              ].join('\n');
-              
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `[ROLLBACK] ${rollbackContext.service_name}`,
-                labels: ['rollback-needed'],
-                body: body
-              });
-            }
+          secret: ${{ secrets.FINE_GRAINED_PAT }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          issue-title: "[ROLLBACK Approval] ${{ needs.plan_rollback.outputs.service_name }}"
+          issue-body: ${{ needs.plan_rollback.outputs.approval_body }}
 
   execute_rollback:
-    name: Execute Approved Rollback
-    if: |
-      github.event_name == 'issue_comment' &&
-      contains(github.event.issue.labels.*.name, 'rollback-needed') &&
-      contains(github.event.comment.body, '/approve-rollback')
+    name: Execute Rollback
+    needs: [plan_rollback, approve_rollback]
     runs-on: [self-hosted, macOS]
     steps:
       - name: Checkout
@@ -120,102 +114,142 @@ jobs:
           fetch-depth: 0
           set-safe-directory: false
 
-      - name: Parse or Resolve Rollback Context
-        id: rollback_context
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SERVICE_NAME="${{ github.event.inputs.service_name }}"
-            CHANGE_ID="${{ github.event.inputs.change_id }}"
-            # Use resolve_deployment_state to find the previous healthy version
-            # Assuming current branch is dev
-            echo "Resolving rollback target for $SERVICE_NAME..."
-            RESULT=$(python3 devops/observability/evaluation/resolve_deployment_state.py resolve \
-              --app "$SERVICE_NAME" \
-              --current-id "$CHANGE_ID" \
-              --branch "dev")
-            
-            echo "app_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
-            echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
-            echo "manifest_dir=devops/k8s/$SERVICE_NAME" >> "$GITHUB_OUTPUT"
-            echo "image_repository=$(echo "$RESULT" | grep 'image_repository:' | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
-            echo "target_tag=$(echo "$RESULT" | grep 'previous_healthy_tag:' | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
-            echo "git_ref_name=dev" >> "$GITHUB_OUTPUT"
-            echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
-          else
-            # Existing Issue/Comment logic
-            python3 - <<EOF
-            import json, os, re
-            body = """${{ github.event.issue.body }}"""
-            match = re.search(r"<!-- rollback-context\s*([\s\S]*?)-->", body)
-            if not match:
-                print("::error::Missing rollback context in issue body")
-                exit(1)
-            ctx = json.loads(match.group(1).strip())
-            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                for k, v in ctx.items():
-                    f.write(f"{k}={v}\n")
-          EOF
-          fi
-
-      - name: Update GitOps Manifest
-        run: |
-          ./scripts/update_image_tag.sh \
-            "${{ steps.rollback_context.outputs.manifest_dir }}" \
-            "${{ steps.rollback_context.outputs.image_repository }}" \
-            "${{ steps.rollback_context.outputs.target_tag }}"
-
-      - name: Promote Healthy State After Rollback
-        run: |
-          python3 devops/observability/evaluation/resolve_deployment_state.py promote \
-            --app "${{ steps.rollback_context.outputs.app_name }}" \
-            --change-id "rollback-${{ github.event.issue.number }}-${{ steps.rollback_context.outputs.change_id }}" \
-            --git-sha "${{ github.sha }}" \
-            --workflow-run-id "${{ github.run_id }}" \
-            --source "rollback"
-
-      - name: Commit and Push Rollback
+      - name: Apply and Push Rollback
         env:
+          ROLLBACK_CONTEXT: ${{ needs.plan_rollback.outputs.rollback_context }}
           GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${{ steps.rollback_context.outputs.manifest_dir }}" "devops/state/${{ steps.rollback_context.outputs.app_name }}.json"
-          if git diff --cached --quiet; then
-            echo "No rollback changes to commit"
-            exit 0
-          fi
-          git commit -m "fix(rollback): revert ${{ steps.rollback_context.outputs.app_name }} to ${{ steps.rollback_context.outputs.target_tag }} [skip ci]"
-          git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
-          git push origin "HEAD:${{ steps.rollback_context.outputs.git_ref_name }}"
+          # Parse context từ biến môi trường
+          python3 - <<EOF
+          import json, os, subprocess
+          ctx = json.loads(os.environ['ROLLBACK_CONTEXT'])
+          
+          # 1. Update Manifest
+          subprocess.run([
+              "./scripts/update_image_tag.sh",
+              ctx['manifest_dir'],
+              ctx['image_repository'],
+              ctx['previous_healthy_tag']
+          ], check=True)
+          
+          # 2. Git Commit & Push
+          subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+          subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "add", ctx['manifest_dir']], check=True)
+          
+          # Kiểm tra xem có thay đổi không
+          diff = subprocess.run(["git", "diff", "--cached", "--quiet"])
+          if diff.returncode == 0:
+              print("No rollback changes to commit")
+              exit(0)
+              
+          msg = f"fix(rollback): revert {ctx['app_name']} to {ctx['previous_healthy_tag']} [skip ci]"
+          subprocess.run(["git", "commit", "-m", msg], check=True)
+          
+          remote_url = f"https://x-access-token:{os.environ['GH_PAT']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+          subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
+          subprocess.run(["git", "push", "origin", "HEAD:dev"], check=True)
+          EOF
 
-      - name: Verify ArgoCD Sync and Health
+  verify_rollback:
+    name: Verify Rollback
+    needs: [plan_rollback, execute_rollback]
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          set-safe-directory: false
+
+      - name: Resolve Verification Context
+        id: verify_context
+        env:
+          ROLLBACK_CONTEXT: ${{ needs.plan_rollback.outputs.rollback_context }}
         run: |
-          echo "Waiting for ArgoCD sync..."
-          echo "Verifying service health..."
-          # logic to poll k8s health or argo status
+          set -euo pipefail
+          python3 - <<'EOF'
+          import json
+          import os
+          from pathlib import Path
+          import yaml
 
-      - name: Close Issue
-        if: github.event_name == 'issue_comment'
+          ctx = json.loads(os.environ["ROLLBACK_CONTEXT"])
+          deployment_path = Path(ctx["manifest_dir"]) / "deployment.yaml"
+          deployment = yaml.safe_load(deployment_path.read_text(encoding="utf-8")) or {}
+
+          metadata = deployment.get("metadata") or {}
+          spec = deployment.get("spec") or {}
+          template = ((spec.get("template") or {}).get("spec") or {})
+          containers = template.get("containers") or []
+          image = ""
+          if containers and isinstance(containers[0], dict):
+              image = str(containers[0].get("image") or "")
+
+          namespace = str(metadata.get("namespace") or "default")
+          deployment_name = str(metadata.get("name") or ctx["service_name"])
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"namespace={namespace}\n")
+              handle.write(f"deployment_name={deployment_name}\n")
+              handle.write(f"expected_image={image}\n")
+              handle.write(f"target_tag={ctx['previous_healthy_tag']}\n")
+              handle.write(f"service_name={ctx['service_name']}\n")
+              handle.write(f"change_id={ctx['change_id']}\n")
+              handle.write(f"current_version={ctx['current_version']}\n")
+              handle.write(f"target_version={ctx['previous_healthy_version']}\n")
+          EOF
+
+      - name: Wait For Rolled Back Deployment
+        id: verify
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          NAMESPACE="${{ steps.verify_context.outputs.namespace }}"
+          DEPLOYMENT_NAME="${{ steps.verify_context.outputs.deployment_name }}"
+          EXPECTED_IMAGE="${{ steps.verify_context.outputs.expected_image }}"
+
+          kubectl -n "$NAMESPACE" rollout status "deployment/$DEPLOYMENT_NAME" --timeout=300s
+
+          ACTUAL_IMAGE="$(kubectl -n "$NAMESPACE" get deployment "$DEPLOYMENT_NAME" -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "Expected image $EXPECTED_IMAGE but found $ACTUAL_IMAGE"
+            exit 1
+          fi
+
+          kubectl -n "$NAMESPACE" wait --for=condition=available "deployment/$DEPLOYMENT_NAME" --timeout=120s
+          kubectl -n "$NAMESPACE" get pods -l "app=$DEPLOYMENT_NAME"
+
+      - name: Create Rollback Failure Issue
+        if: steps.verify.outcome == 'failure'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.FINE_GRAINED_PAT || github.token }}
           script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
+              title: `🚨 [Rollback Failed] ${{ steps.verify_context.outputs.service_name }} - ${{ steps.verify_context.outputs.change_id }}`,
+              labels: ['rollback-failed', 'observability-alert'],
               body: [
-                '✅ Rollback executed successfully.',
+                '## Rollback Verification Failed',
                 '',
-                '- Service: `${{ steps.rollback_context.outputs.service_name }}`',
-                '- Previous image: `${{ steps.rollback_context.outputs.current_version }}`',
-                '- Current image: `${{ steps.rollback_context.outputs.target_version }}`'
+                `- Service: \`${{ steps.verify_context.outputs.service_name }}\``,
+                `- Change ID: \`${{ steps.verify_context.outputs.change_id }}\``,
+                `- Current version before rollback: \`${{ steps.verify_context.outputs.current_version }}\``,
+                `- Rollback target: \`${{ steps.verify_context.outputs.target_version }}\``,
+                `- Expected deployment image: \`${{ steps.verify_context.outputs.expected_image }}\``,
+                `- Namespace: \`${{ steps.verify_context.outputs.namespace }}\``,
+                `- Deployment: \`${{ steps.verify_context.outputs.deployment_name }}\``,
+                '',
+                'Rollback commit was pushed to GitOps, but the cluster did not converge to a healthy rolled-back deployment within the verification window.',
+                'Manual investigation is required.',
               ].join('\n')
-            })
-            github.rest.issues.update({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'closed'
-            })
+            });
+
+      - name: Fail Workflow On Verification Error
+        if: steps.verify.outcome == 'failure'
+        run: |
+          echo "Rollback verification failed; issue created for manual investigation."
+          exit 1
