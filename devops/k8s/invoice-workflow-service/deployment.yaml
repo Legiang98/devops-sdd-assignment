@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: invoice-workflow-service:81d3ae82478a
+          image: invoice-workflow-service:701cab93ca9b
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

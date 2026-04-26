@@ -6,7 +6,7 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
-    devops.ssd/change-id: 81d3ae82478a
+    devops.ssd/change-id: 701cab93ca9b
 spec:
   ttlSecondsAfterFinished: 600
   template:
@@ -27,9 +27,9 @@ spec:
         - name: APP_LABEL
           value: invoice-workflow-service
         - name: CHANGE_ID
-          value: 81d3ae82478a
+          value: 701cab93ca9b
         - name: CURRENT_VERSION
-          value: 81d3ae82478a
+          value: 701cab93ca9b
         - name: PREVIOUS_HEALTHY_VERSION
           value: v1
         - name: ARGOCD_APP_NAME
