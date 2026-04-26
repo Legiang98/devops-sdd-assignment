@@ -53,7 +53,23 @@ jobs:
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
               SPEC_FILE="applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
             elif [ "${{ github.event_name }}" = "push" ]; then
-              CHANGED_SPECS="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')"
+              NULL_SHA="0000000000000000000000000000000000000000"
+              BEFORE_SHA="${{ github.event.before }}"
+
+              if [ "${BEFORE_SHA}" = "${NULL_SHA}" ] || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+                echo "before SHA is null or unavailable; using fallback diff strategy"
+
+                if git show-ref --verify --quiet "refs/remotes/origin/dev"; then
+                  BASE_SHA="$(git merge-base "origin/dev" "${{ github.sha }}")"
+                  echo "Using merge-base with origin/dev: ${BASE_SHA}"
+                  CHANGED_SPECS="$(git diff --name-only "${BASE_SHA}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')"
+                else
+                  echo "origin/dev not available; diffing current commit against root"
+                  CHANGED_SPECS="$(git diff-tree --root --no-commit-id --name-only -r "${{ github.sha }}" -- 'applications/**/specs/*.yaml')"
+                fi
+              else
+                CHANGED_SPECS="$(git diff --name-only "${BEFORE_SHA}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')"
+              fi
             else
               CHANGED_SPECS="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" -- 'applications/**/specs/*.yaml')"
             fi
