@@ -32,9 +32,7 @@ def analyze_prometheus(prom_data):
         pod = res.get("metric", {}).get("pod", "unknown")
         value = res.get("value", [0, "0"])[1]
         if int(value) > 0:
-            findings.append(
-                f"[Source: Prometheus] Signal: {reason} detected on pod {pod}"
-            )
+            findings.append(f"[Source: Prometheus] Reason: {reason} (Pod: {pod})")
             if reason in ["CrashLoopBackOff", "OOMKilled", "Error", "ImagePullBackOff"]:
                 return True, findings
 

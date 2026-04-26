@@ -37,8 +37,8 @@ PY
 fi
 
 echo "[*] Querying Prometheus (kube-state-metrics) for infra signals..."
-# Truy vấn các lý do container bị terminated hoặc waiting (CrashLoop, OOM, etc.)
-PROM_QUERY="sum by (reason) (kube_pod_container_status_terminated_reason{namespace=\"$NAMESPACE\", pod=~\"$APP_LABEL.*\"}) or sum by (reason) (kube_pod_container_status_waiting_reason{namespace=\"$NAMESPACE\", pod=~\"$APP_LABEL.*\"})"
+# Truy vấn linh hoạt hơn bằng cách tìm kiếm từ khóa trong tên Pod
+PROM_QUERY="sum by (reason, pod) (kube_pod_container_status_terminated_reason{namespace=\"$NAMESPACE\", pod=~\".*$APP_LABEL.*\"}) or sum by (reason, pod) (kube_pod_container_status_waiting_reason{namespace=\"$NAMESPACE\", pod=~\".*$APP_LABEL.*\"})"
 
 curl -G -s "$PROMETHEUS_URL/api/v1/query" --data-urlencode "query=$PROM_QUERY" > "$OUTPUT_DIR/prometheus_infra_signals.json" || echo '{"status":"error"}' > "$OUTPUT_DIR/prometheus_infra_signals.json"
 
