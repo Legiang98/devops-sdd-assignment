@@ -58,7 +58,7 @@ Rules:
 - Put feature logic in separate src files when useful.
 - main.py should compose/import feature modules.
 - Keep code runnable.
-- Keep /health and /metrics.
+- Keep /health, /healthz, /readiness, and /metrics.
 - Implement only routes present in the contract.
 - If reject is disabled, do not add the reject route.
 - If reject is enabled, require reason_code and comment."""
@@ -80,7 +80,7 @@ Current src files:
 
 Requirements:
 - src_files["main.py"] must import from src.generated.spec_contract
-- src_files["main.py"] must also keep GET /health and GET /metrics
+- src_files["main.py"] must also keep GET /health, GET /healthz, GET /readiness, and GET /metrics
 - routes must match exactly: {api_endpoints_json}
 - all JSON values must be strings"""
 
@@ -395,6 +395,8 @@ def audit(event: str, payload: dict[str, Any]) -> None:
 
 
 @app.get("/health")
+@app.get("/healthz")
+@app.get("/readiness")
 def health() -> dict[str, str]:
     return {{
         "status": "ok",
@@ -555,6 +557,8 @@ request_total = Counter("generated_request_total", "Generated placeholder reques
 
 
 @app.get("/health")
+@app.get("/healthz")
+@app.get("/readiness")
 def health() -> dict[str, object]:
     return {{
         "status": "ok",
@@ -587,6 +591,36 @@ def dockerfile_body(app_dir_name: str) -> str:
         f"COPY applications/{app_dir_name}/src /app/src\n\n"
         'CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]\n'
     )
+
+
+def requirements_body(src_files: dict[str, str]) -> str:
+    packages = {"fastapi>=0.116.0", "uvicorn>=0.35.0"}
+    import_to_package = {
+        "pydantic": "pydantic>=2.11.0",
+        "prometheus_client": "prometheus-client>=0.22.1",
+        "opentelemetry": "opentelemetry-api>=1.27.0",
+        "opentelemetry.sdk": "opentelemetry-sdk>=1.27.0",
+        "opentelemetry.instrumentation.fastapi": "opentelemetry-instrumentation-fastapi>=0.48b0",
+        "opentelemetry.exporter.otlp.proto.http": "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    }
+
+    for content in src_files.values():
+        tree = ast.parse(content)
+        for node in ast.walk(tree):
+            module_name = None
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    module_name = alias.name
+                    for prefix, package in import_to_package.items():
+                        if module_name == prefix or module_name.startswith(f"{prefix}."):
+                            packages.add(package)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                module_name = node.module
+                for prefix, package in import_to_package.items():
+                    if module_name == prefix or module_name.startswith(f"{prefix}."):
+                        packages.add(package)
+
+    return "\n".join(sorted(packages)) + "\n"
 
 
 def service_readme_body(app_dir_name: str) -> str:
@@ -846,7 +880,14 @@ def validate_app_source_against_spec(app_source: str, spec: dict) -> list[str]:
         (str(endpoint["method"]).upper(), endpoint["path"])
         for endpoint in spec.get("api_contract", {}).get("endpoints", [])
     }
-    expected_routes.update({("GET", "/health"), ("GET", "/metrics")})
+    expected_routes.update(
+        {
+            ("GET", "/health"),
+            ("GET", "/healthz"),
+            ("GET", "/readiness"),
+            ("GET", "/metrics"),
+        }
+    )
     for route in sorted(expected_routes):
         if route not in routes:
             violations.append(f"generated app missing route {route[0]} {route[1]}")
@@ -1153,6 +1194,7 @@ def main() -> None:
     tests_readme_path = tests_root / "README.md"
     tests_module_path = tests_root / "test_generated_placeholder.py"
     dockerfile_path = app_root / "Dockerfile"
+    requirements_path = app_root / "requirements.txt"
     namespace_path = gitops_root / "namespace.yaml"
     deployment_path = gitops_root / "deployment.yaml"
     service_path = gitops_root / "service.yaml"
@@ -1225,6 +1267,7 @@ def main() -> None:
         target.write_text(content, encoding="utf-8")
         written_src_files.append(str(target.resolve()))
     dockerfile_path.write_text(dockerfile_body(app_dir_name), encoding="utf-8")
+    requirements_path.write_text(requirements_body(src_files), encoding="utf-8")
     app_readme_path.write_text(service_readme_body(app_dir_name), encoding="utf-8")
     src_readme_path.write_text(src_readme_body(), encoding="utf-8")
     tests_readme_path.write_text(tests_readme_body(), encoding="utf-8")

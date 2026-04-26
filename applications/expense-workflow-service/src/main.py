@@ -129,6 +129,8 @@ def audit(event: str, payload: dict[str, Any]) -> None:
 
 
 @app.get("/health")
+@app.get("/healthz")
+@app.get("/readiness")
 def health() -> dict[str, str]:
     return {
         "status": "ok",

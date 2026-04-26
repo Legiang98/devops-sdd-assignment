@@ -24,6 +24,7 @@ jobs:
       should_run: ${{ steps.detect.outputs.changed }}
       app_name: ${{ steps.detect.outputs.app_name }}
       app_path: ${{ steps.detect.outputs.app_path }}
+      app_dockerfile: ${{ steps.detect.outputs.app_dockerfile }}
       manifest_dir: ${{ steps.detect.outputs.manifest_dir }}
       argocd_application_path: ${{ steps.detect.outputs.argocd_application_path }}
     steps:
@@ -54,10 +55,12 @@ jobs:
           
           APP_NAME=$(basename $(dirname $(dirname "$SPEC_FILE")))
           APP_PATH="applications/$APP_NAME"
+          APP_DOCKERFILE="$APP_PATH/Dockerfile"
           ARGOCD_APPLICATION_PATH="devops/k8s/argocd/${APP_NAME}-application.yaml"
           echo "detected_spec=$SPEC_FILE" >> "$GITHUB_OUTPUT"
           echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_dockerfile=$APP_DOCKERFILE" >> "$GITHUB_OUTPUT"
           echo "manifest_dir=devops/k8s/$APP_NAME" >> "$GITHUB_OUTPUT"
           echo "argocd_application_path=$ARGOCD_APPLICATION_PATH" >> "$GITHUB_OUTPUT"
           echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -65,9 +68,20 @@ jobs:
       - name: Build App Image via Minikube
         if: steps.detect.outputs.changed == 'true'
         run: |
+          set -euo pipefail
           APP_NAME="${{ steps.detect.outputs.app_name }}"
+          APP_DOCKERFILE="${{ steps.detect.outputs.app_dockerfile }}"
           IMAGE_TAG="${GITHUB_SHA::12}"
-          minikube image build -t "$APP_NAME:$IMAGE_TAG" .
+
+          if [ ! -f "$APP_DOCKERFILE" ]; then
+            echo "App Dockerfile not found: $APP_DOCKERFILE"
+            exit 1
+          fi
+
+          minikube image build \
+            -f "$APP_DOCKERFILE" \
+            -t "$APP_NAME:$IMAGE_TAG" \
+            .
 
       - name: Setup Python and Dependencies
         if: steps.detect.outputs.changed == 'true'

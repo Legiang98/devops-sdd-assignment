@@ -21,6 +21,8 @@ request_total = Counter("generated_request_total", "Generated placeholder reques
 
 
 @app.get("/health")
+@app.get("/healthz")
+@app.get("/readiness")
 def health() -> dict[str, object]:
     return {
         "status": "ok",
