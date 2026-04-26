@@ -15,7 +15,7 @@ workflow_change:
   new_stage:
     name: finance
     required_when:
-      amount_gte: 4000 
+      amount_gte: 4500
 api_contract:
   endpoints:
     - method: POST
