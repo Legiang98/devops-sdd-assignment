@@ -35,6 +35,8 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.FINE_GRAINED_PAT }}
+          token: ${{ secrets.FINE_GRAINED_PAT }}
+          token: ${{ secrets.FINE_GRAINED_PAT }}
 
       - name: Resolve spec and release id
         id: resolve
@@ -123,6 +125,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.FINE_GRAINED_PAT }}
 
       - name: Install dependencies
         run: |
@@ -203,6 +206,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.FINE_GRAINED_PAT }}
 
       - name: Download generated workspace
         uses: actions/download-artifact@v4
