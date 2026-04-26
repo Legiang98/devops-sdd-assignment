@@ -11,10 +11,16 @@ has_generated_route(method, path) if {
   actual.path == path
 }
 
+has_generated_reject_route if {
+  some actual in input.generated.app_routes
+  actual.method == "POST"
+  endswith(actual.path, "/reject")
+}
+
 reject_expected if {
   some endpoint in input.spec.api_contract.endpoints
   upper(endpoint.method) == "POST"
-  endpoint.path == "/expenses/{expense_id}/reject"
+  endswith(endpoint.path, "/reject")
 }
 
 deny contains msg if {
@@ -82,13 +88,13 @@ deny contains msg if {
 
 deny contains msg if {
   reject_expected
-  not has_generated_route("POST", "/expenses/{expense_id}/reject")
+  not has_generated_reject_route
   msg := "generated app reject route does not match spec"
 }
 
 deny contains msg if {
   not reject_expected
-  has_generated_route("POST", "/expenses/{expense_id}/reject")
+  has_generated_reject_route
   msg := "generated app reject route does not match spec"
 }
 

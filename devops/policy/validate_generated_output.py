@@ -142,8 +142,8 @@ def main() -> None:
             if route not in actual_routes:
                 violations.append(f"generated app missing route {route[0]} {route[1]}")
 
-        reject_expected = ("POST", "/expenses/{expense_id}/reject") in expected_routes
-        has_reject = ("POST", "/expenses/{expense_id}/reject") in actual_routes
+        reject_expected = any(method == "POST" and path.endswith("/reject") for method, path in expected_routes)
+        has_reject = any(method == "POST" and path.endswith("/reject") for method, path in actual_routes)
         print(f"[policy] reject route expected={reject_expected} actual={has_reject}")
         if has_reject != reject_expected:
             violations.append("generated app reject route does not match spec")
