@@ -1,4 +1,4 @@
-name: Feat Branch Workflow
+name: Feature Codegen Workflow
 
 on:
   push:
@@ -163,23 +163,12 @@ jobs:
         with:
           github-token: ${{ secrets.FINE_GRAINED_PAT }}
           script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
+            const { owner, repo } = context.repo;
             const head = process.env.BRANCH_NAME;
-            const qualifiedHead = `${owner}:${head}`;
             const base = process.env.BASE_BRANCH;
-            const title = `feat: ${process.env.RELEASE_ID}`;
-            const body = [
-              "Spec-driven feat branch workflow PR.",
-              "",
-              `- Release ID: \`${process.env.RELEASE_ID}\``,
-              `- Spec: \`${process.env.SPEC_FILE}\``,
-              `- Generated changes committed to branch: \`${head}\``,
-              `- Workflow committed new changes: \`${process.env.HAS_CHANGES || "false"}\``,
-              "- Policy check passed before PR creation.",
-              "- Deployment and rollback are intentionally excluded.",
-            ].join("\n");
+            const qualifiedHead = `${owner}:${head}`;
 
+            core.info(`Checking for existing PR: ${qualifiedHead} -> ${base}`);
             const existing = await github.rest.pulls.list({
               owner,
               repo,
@@ -189,17 +178,28 @@ jobs:
             });
 
             if (existing.data.length > 0) {
-              core.info(`PR already exists: ${existing.data[0].html_url}`);
+              core.notice(`Ignoring PR creation: A Pull Request already exists for ${head} (#${existing.data[0].number})`);
+              core.info(`Link: ${existing.data[0].html_url}`);
               return;
             }
 
+            core.info(`Creating new PR for ${head}...`);
             const created = await github.rest.pulls.create({
               owner,
               repo,
-              title,
-              head: qualifiedHead,
-              base,
-              body,
+              title: `feat: ${process.env.RELEASE_ID}`,
+              head: head,
+              base: base,
+              body: [
+                "Spec-driven feat branch workflow PR.",
+                "",
+                `- Release ID: \`${process.env.RELEASE_ID}\``,
+                `- Spec: \`${process.env.SPEC_FILE}\``,
+                `- Generated changes committed to branch: \`${head}\``,
+                `- Workflow committed new changes: \`${process.env.HAS_CHANGES || "false"}\``,
+                "- Policy check passed before PR creation.",
+                "- Deployment and rollback are intentionally excluded.",
+              ].join("\n"),
             });
 
-            core.info(`Created PR: ${created.data.html_url}`);
+            core.info(`Successfully created PR #${created.data.number}: ${created.data.html_url}`);
