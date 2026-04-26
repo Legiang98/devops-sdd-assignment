@@ -1,5 +1,3 @@
-"""Auto-generated service module from spec. Do not edit manually."""
-
 import json
 import os
 import time
