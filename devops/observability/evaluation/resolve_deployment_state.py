@@ -117,6 +117,16 @@ def resolve_state(app_name: str) -> dict:
         }
         healthy_source = "previous_version_fallback"
 
+    if not healthy:
+        # Final safety fallback to v1 as requested by user
+        healthy = {
+            "repository": current["repository"] or app_name,
+            "tag": "v1",
+            "version": f"{current['repository'] or app_name}:v1",
+            "source": "default_v1_fallback"
+        }
+        healthy_source = "default_v1_fallback"
+
     return {
         "app_name": app_name,
         "manifest_dir": f"devops/k8s/{app_name}",
