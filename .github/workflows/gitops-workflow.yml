@@ -103,16 +103,8 @@ jobs:
         if: steps.detect.outputs.changed == 'true'
         run: |
           set -euo pipefail
-          SOURCE_DIFF_FILE=source.diff
           DEPLOY_DIFF_FILE=deploy.diff
           APPROVAL_BODY_FILE=approval_issue_body.md
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            git diff "${{ github.event.before }}" "${{ github.sha }}" -- \
-              "${{ steps.detect.outputs.app_path }}" \
-              "${{ steps.detect.outputs.detected_spec }}" > "$SOURCE_DIFF_FILE"
-          else
-            : > "$SOURCE_DIFF_FILE"
-          fi
           git add -A \
             "${{ steps.detect.outputs.manifest_dir }}" \
             "${{ steps.detect.outputs.argocd_application_path }}"
@@ -121,24 +113,10 @@ jobs:
             "${{ steps.detect.outputs.argocd_application_path }}" > "$DEPLOY_DIFF_FILE"
 
           {
-            echo "### 🚀 Planned Changes for ${{ steps.detect.outputs.app_name }}"
+            echo "### 🚀 GitOps Diff for ${{ steps.detect.outputs.app_name }}"
             echo ""
-            echo "- Spec: \`${{ steps.detect.outputs.detected_spec }}\`"
-            echo "- App Path: \`${{ steps.detect.outputs.app_path }}\`"
             echo "- Manifest Path: \`${{ steps.detect.outputs.manifest_dir }}\`"
             echo "- Argo CD App: \`${{ steps.detect.outputs.argocd_application_path }}\`"
-          } > "$APPROVAL_BODY_FILE"
-
-          if [ -s "$SOURCE_DIFF_FILE" ]; then
-            {
-              echo ""
-              echo "#### Source Diff"
-              echo "\`\`\`diff"
-              sed -n '1,250p' "$SOURCE_DIFF_FILE"
-              echo "\`\`\`"
-            } >> "$APPROVAL_BODY_FILE"
-          fi
-          {
             echo ""
             echo "#### GitOps Diff"
             echo "\`\`\`diff"
@@ -146,7 +124,7 @@ jobs:
             echo "\`\`\`"
             echo ""
             echo "Please approve to deploy these changes."
-          } >> "$APPROVAL_BODY_FILE"
+          } > "$APPROVAL_BODY_FILE"
 
       - name: Upload Manifest Artifacts
         if: steps.detect.outputs.changed == 'true'

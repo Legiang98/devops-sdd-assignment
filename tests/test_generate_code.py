@@ -1,6 +1,7 @@
 import unittest
 
 from devops.agent.generate_code import (
+    dockerfile_body,
     expected_contract,
     generic_app_module_body,
     validate_app_source_against_spec,
@@ -49,6 +50,15 @@ class GenerateCodeTests(unittest.TestCase):
         contract = expected_contract(spec)
 
         self.assertTrue(contract["reject_endpoint_enabled"])
+
+    def test_dockerfile_uses_repo_root_relative_requirements_path(self):
+        dockerfile = dockerfile_body("purchase-request-workflow-service")
+
+        self.assertIn(
+            "COPY applications/purchase-request-workflow-service/requirements.txt /app/requirements.txt",
+            dockerfile,
+        )
+        self.assertNotIn("COPY requirements.txt /app/requirements.txt", dockerfile)
 
 
 if __name__ == "__main__":

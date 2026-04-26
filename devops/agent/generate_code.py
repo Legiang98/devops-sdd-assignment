@@ -582,7 +582,7 @@ def dockerfile_body(app_dir_name: str) -> str:
     return (
         "FROM python:3.12-slim\n\n"
         "WORKDIR /app\n\n"
-        "COPY requirements.txt /app/requirements.txt\n"
+        f"COPY applications/{app_dir_name}/requirements.txt /app/requirements.txt\n"
         "RUN pip install --no-cache-dir -r /app/requirements.txt\n\n"
         f"COPY applications/{app_dir_name}/src /app/src\n\n"
         'CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]\n'

@@ -1,10 +1,6 @@
 FROM python:3.12-slim
-
 WORKDIR /app
-
-COPY applications/expense-workflow-service/requirements.txt /app/requirements.txt
+COPY applications/invoice-workflow-service/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
-
-COPY applications/expense-workflow-service/src /app/src
-
+COPY applications/invoice-workflow-service/src /app/src
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
