@@ -17,12 +17,12 @@ on:
 
 jobs:
   build:
+    name: Build and Plan Manifests
     if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: [self-hosted, macOS]
     outputs:
       should_run: ${{ steps.detect.outputs.changed }}
       app_name: ${{ steps.detect.outputs.app_name }}
-      detected_spec: ${{ steps.detect.outputs.detected_spec }}
       manifest_dir: ${{ steps.detect.outputs.manifest_dir }}
     steps:
       - name: Checkout
@@ -63,83 +63,107 @@ jobs:
           IMAGE_TAG="${GITHUB_SHA::12}"
           minikube image build -t "$APP_NAME:$IMAGE_TAG" .
 
-  gitops:
-    needs: build
-    if: needs.build.outputs.should_run == 'true'
-    runs-on: [self-hosted, macOS]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.FINE_GRAINED_PAT }}
-          set-safe-directory: false
-
       - name: Setup Python and Dependencies
+        if: steps.detect.outputs.changed == 'true'
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
           pip install requests pyyaml
 
       - name: Generate Infrastructure Manifests
+        if: steps.detect.outputs.changed == 'true'
         run: |
           source .venv/bin/activate
           python3 devops/agent/generate_gitops.py \
-            --spec "${{ needs.build.outputs.detected_spec }}" \
-            --output-dir "${{ needs.build.outputs.manifest_dir }}"
+            --spec "${{ steps.detect.outputs.detected_spec }}" \
+            --output-dir "${{ steps.detect.outputs.manifest_dir }}"
 
       - name: Run OPA Policy Check
+        if: steps.detect.outputs.changed == 'true'
         run: |
-          echo "[OPA] Checking manifests for ${{ needs.build.outputs.app_name }}..."
-          if grep -r "privileged: true" "${{ needs.build.outputs.manifest_dir }}"; then
+          echo "[OPA] Checking manifests..."
+          if grep -r "privileged: true" "${{ steps.detect.outputs.manifest_dir }}"; then
             echo "❌ Policy violation: Privileged containers are not allowed!"
             exit 1
           fi
-          echo "✅ OPA policy check passed."
 
-      - name: Update Image Tag and Push Proposal
-        id: push_proposal
+      - name: Update Image Tag in Manifests
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          IMAGE_TAG="${GITHUB_SHA::12}"
+          ./scripts/update_image_tag.sh "${{ steps.detect.outputs.manifest_dir }}" "${{ steps.detect.outputs.app_name }}" "$IMAGE_TAG"
+
+      - name: Capture Manifest Diff
+        if: steps.detect.outputs.changed == 'true'
+        id: diff
+        run: |
+          git diff devops/k8s/ > manifest.diff
+          echo "### 🚀 Manifest Changes for ${{ steps.detect.outputs.app_name }}" > approval_body.md
+          echo "\`\`\`diff" >> approval_body.md
+          cat manifest.diff >> approval_body.md
+          echo "\`\`\`" >> approval_body.md
+
+      - name: Upload Manifest Artifacts
+        if: steps.detect.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifests-${{ github.run_id }}
+          path: |
+            ${{ steps.detect.outputs.manifest_dir }}
+            approval_body.md
+
+  approve:
+    name: Manual Approval
+    needs: build
+    if: needs.build.outputs.should_run == 'true'
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Download Diff for Approval
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests-${{ github.run_id }}
+
+      - name: Await Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.FINE_GRAINED_PAT }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          issue-title: "[GitOps Approval] ${{ needs.build.outputs.app_name }} manifest update"
+          issue-body: "Please review the manifest changes in the artifact or the diff below and approve to deploy."
+
+  apply:
+    name: Apply Manifests
+    needs: [build, approve]
+    if: needs.build.outputs.should_run == 'true' && needs.approve.result == 'success'
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.FINE_GRAINED_PAT }}
+          fetch-depth: 0
+          set-safe-directory: false
+
+      - name: Download Approved Manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests-${{ github.run_id }}
+          path: .
+
+      - name: Push to Git
         env:
           GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
         run: |
-          set -euo pipefail
-          APP_NAME="${{ needs.build.outputs.app_name }}"
-          MANIFEST_DIR="${{ needs.build.outputs.manifest_dir }}"
-          IMAGE_TAG="${GITHUB_SHA::12}"
-          PROP_BRANCH="proposal/${APP_NAME}-${GITHUB_SHA::8}"
-
-          ./scripts/update_image_tag.sh "$MANIFEST_DIR" "$APP_NAME" "$IMAGE_TAG"
-          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$MANIFEST_DIR"
+          git add "${{ needs.build.outputs.manifest_dir }}"
           
           if git diff --cached --quiet; then
             echo "No changes to commit"
-            echo "prop_branch=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git commit -m "ci(gitops): propose manifest update for $APP_NAME"
+          git commit -m "ci(gitops): update ${{ needs.build.outputs.app_name }} manifests [skip ci]"
           git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
-          git push origin "HEAD:$PROP_BRANCH"
-          echo "prop_branch=$PROP_BRANCH" >> "$GITHUB_OUTPUT"
-
-      - name: Create Approval Issue
-        if: steps.push_proposal.outputs.prop_branch != ''
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.FINE_GRAINED_PAT }}
-          script: |
-            const { owner, repo } = context.repo;
-            const app = "${{ needs.build.outputs.app_name }}";
-            const branch = "${{ steps.push_proposal.outputs.prop_branch }}";
-            const diff = require('child_process').execSync('git diff origin/${{ github.ref_name }} HEAD -- devops/k8s/').toString();
-            
-            await github.rest.issues.create({
-              owner,
-              repo,
-              title: `[GitOps Approval Required] manifest update for ${app}`,
-              labels: ['gitops-approval'],
-              body: `### 🚀 Manifest Update Request\n\nApplication: **${app}**\nProposal Branch: \`${branch}\`\nTarget Branch: \`${{ github.ref_name }}\`\n\n#### Diff Evidence:\n\`\`\`diff\n${diff}\n\`\`\`\n\nPlease review and comment \`/approve\` to merge these changes.`
-            });
+          git push origin "HEAD:${{ github.ref_name }}"
