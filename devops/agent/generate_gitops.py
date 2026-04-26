@@ -416,6 +416,7 @@ def render_post_deploy_evaluation_job(
                                         '    "change_id": "${CHANGE_ID}",',
                                         '    "current_version": "${CURRENT_VERSION}",',
                                         '    "previous_healthy_version": "${PREVIOUS_HEALTHY_VERSION}",',
+                                        '    "update_healthy_state": "true",',
                                         '    "argocd_app_name": "${ARGOCD_APP_NAME}",',
                                         f'    "prometheus_url": "${{{PROMETHEUS_URL_ENV_NAME}}}",',
                                         f'    "loki_url": "${{{LOKI_URL_ENV_NAME}}}",',

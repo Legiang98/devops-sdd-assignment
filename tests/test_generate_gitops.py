@@ -124,6 +124,7 @@ class GenerateGitOpsTests(unittest.TestCase):
             self.assertIn('"ref": "${OBSERVABILITY_WORKFLOW_REF}"', dispatch_script)
             self.assertIn('"prometheus_url": "${PROMETHEUS_URL}"', dispatch_script)
             self.assertIn('"loki_url": "${LOKI_URL}"', dispatch_script)
+            self.assertIn('"update_healthy_state": "true"', dispatch_script)
 
     def test_ingress_can_be_disabled(self):
         baseline_spec = {

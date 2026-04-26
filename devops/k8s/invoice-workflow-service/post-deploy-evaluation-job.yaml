@@ -70,6 +70,7 @@ spec:
               "change_id": "${CHANGE_ID}",
               "current_version": "${CURRENT_VERSION}",
               "previous_healthy_version": "${PREVIOUS_HEALTHY_VERSION}",
+              "update_healthy_state": "true",
               "argocd_app_name": "${ARGOCD_APP_NAME}",
               "prometheus_url": "${PROMETHEUS_URL}",
               "loki_url": "${LOKI_URL}",

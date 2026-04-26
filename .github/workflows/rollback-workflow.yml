@@ -12,69 +12,112 @@ permissions:
   pull-requests: write
 
 jobs:
-  analyze_crash:
-    name: Analyze Crash and Propose Plan
-    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'crash')
-    runs-on: [self-hosted, macOS]
+  propose_rollback_plan:
+    name: Propose Rollback Plan
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'rollback-needed')
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          set-safe-directory: false
-
-      - name: Agent Analysis
-        run: |
-          echo "Agent is analyzing crash logs..."
-          echo "Generating rollback plan for evidence..."
-          # logic for agent to analyze logs and update issue with plan
-
       - name: Post Plan to Issue
         uses: actions/github-script@v7
         with:
           script: |
+            const body = context.payload.issue.body || '';
+            const match = body.match(/<!-- rollback-context\s*([\s\S]*?)-->/);
+            if (!match) {
+              core.setFailed('Missing rollback context in issue body.');
+              return;
+            }
+            const rollbackContext = JSON.parse(match[1].trim());
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: "### 🛡️ Proposed Rollback Plan\n\nEvidence suggests a crash in service 'XYZ'.\nProposed action: Revert to image tag 'v1.2.0'.\n\nPlease comment `/approve-rollback` or `LGTM` to proceed."
+              body: [
+                '### 🛡️ Proposed Rollback Plan',
+                '',
+                `- Service: \`${rollbackContext.service_name}\``,
+                `- Current image: \`${rollbackContext.current_version}\``,
+                `- Rollback target: \`${rollbackContext.previous_healthy_version}\``,
+                `- Source of healthy target: \`${rollbackContext.previous_healthy_source}\``,
+                '',
+                'Please comment `/approve-rollback` to proceed.'
+              ].join('\n')
             })
 
   execute_rollback:
     name: Execute Approved Rollback
     if: |
       github.event_name == 'issue_comment' &&
-      (contains(github.event.comment.body, '/approve-rollback') || contains(github.event.comment.body, 'LGTM'))
+      contains(github.event.issue.labels.*.name, 'rollback-needed') &&
+      contains(github.event.comment.body, '/approve-rollback') &&
+      (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR')
     runs-on: [self-hosted, macOS]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.FINE_GRAINED_PAT }}
-          clean: true
+          fetch-depth: 0
           set-safe-directory: false
 
-      - name: Identify Healthy Tag
-        id: healthy_tag
-        run: |
-          echo "Finding last stable image tag from Git history..."
-          # Logic: git log devops/k8s/ --pretty=format:"%H" -n 2
-          echo "tag=v1.2.0" >> "$GITHUB_OUTPUT"
+      - name: Parse Rollback Context
+        id: rollback_context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            const match = body.match(/<!-- rollback-context\s*([\s\S]*?)-->/);
+            if (!match) {
+              core.setFailed('Missing rollback context in issue body.');
+              return;
+            }
+            const rollbackContext = JSON.parse(match[1].trim());
+            if (!rollbackContext.previous_healthy_tag || !rollbackContext.image_repository) {
+              core.setFailed('Rollback context is missing healthy image metadata.');
+              return;
+            }
+            core.setOutput('app_name', rollbackContext.app_name);
+            core.setOutput('service_name', rollbackContext.service_name);
+            core.setOutput('manifest_dir', rollbackContext.manifest_dir);
+            core.setOutput('state_path', rollbackContext.state_path);
+            core.setOutput('image_repository', rollbackContext.image_repository);
+            core.setOutput('current_version', rollbackContext.current_version);
+            core.setOutput('target_version', rollbackContext.previous_healthy_version);
+            core.setOutput('target_tag', rollbackContext.previous_healthy_tag);
+            core.setOutput('change_id', rollbackContext.change_id);
+            core.setOutput('git_ref_name', rollbackContext.git_ref_name);
 
       - name: Update GitOps Manifest
         run: |
-          echo "Updating manifests to tag ${{ steps.healthy_tag.outputs.tag }}..."
-          # ./scripts/update_image_tag.sh <manifest_dir> <repo> ${{ steps.healthy_tag.outputs.tag }}
+          ./scripts/update_image_tag.sh \
+            "${{ steps.rollback_context.outputs.manifest_dir }}" \
+            "${{ steps.rollback_context.outputs.image_repository }}" \
+            "${{ steps.rollback_context.outputs.target_tag }}"
+
+      - name: Promote Healthy State After Rollback
+        run: |
+          python3 devops/observability/evaluation/resolve_deployment_state.py promote \
+            --app "${{ steps.rollback_context.outputs.app_name }}" \
+            --change-id "rollback-${{ github.event.issue.number }}-${{ steps.rollback_context.outputs.change_id }}" \
+            --git-sha "${{ github.sha }}" \
+            --workflow-run-id "${{ github.run_id }}" \
+            --source "rollback"
 
       - name: Commit and Push Rollback
         env:
           GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add devops/k8s/
-          git commit -m "fix(rollback): revert to ${{ steps.healthy_tag.outputs.tag }} [skip ci]"
+          git add "${{ steps.rollback_context.outputs.manifest_dir }}" "devops/state/${{ steps.rollback_context.outputs.app_name }}.json"
+          if git diff --cached --quiet; then
+            echo "No rollback changes to commit"
+            exit 0
+          fi
+          git commit -m "fix(rollback): revert ${{ steps.rollback_context.outputs.app_name }} to ${{ steps.rollback_context.outputs.target_tag }} [skip ci]"
           git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
-          git push origin HEAD
+          git push origin "HEAD:${{ steps.rollback_context.outputs.git_ref_name }}"
 
       - name: Verify ArgoCD Sync and Health
         run: |
@@ -90,7 +133,13 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: "✅ Rollback executed successfully. Service is healthy."
+              body: [
+                '✅ Rollback executed successfully.',
+                '',
+                '- Service: `${{ steps.rollback_context.outputs.service_name }}`',
+                '- Previous image: `${{ steps.rollback_context.outputs.current_version }}`',
+                '- Current image: `${{ steps.rollback_context.outputs.target_version }}`'
+              ].join('\n')
             })
             github.rest.issues.update({
               issue_number: context.issue.number,
