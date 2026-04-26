@@ -16,7 +16,7 @@ DEFAULT_MANIFEST_TOGGLES = {
 ARGOCD_NAMESPACE = "argocd"
 POST_DEPLOY_TRIGGER_SECRET_NAME = "gha-post-deployment-trigger"
 POST_DEPLOY_TRIGGER_SECRET_KEY = "pat"
-OBSERVABILITY_WORKFLOW_REF = "feat/post-deployment"
+OBSERVABILITY_WORKFLOW_REF = "dev"
 POST_DEPLOY_ENV_CONFIGMAP_NAME = "post-deployment-evaluation-env"
 PROMETHEUS_URL_ENV_NAME = "PROMETHEUS_URL"
 LOKI_URL_ENV_NAME = "LOKI_URL"
@@ -391,6 +391,7 @@ def render_post_deploy_evaluation_job(
                                         "configMapKeyRef": {
                                             "name": POST_DEPLOY_ENV_CONFIGMAP_NAME,
                                             "key": PROMETHEUS_URL_ENV_NAME,
+                                            "optional": True,
                                         }
                                     },
                                 },
@@ -400,6 +401,7 @@ def render_post_deploy_evaluation_job(
                                         "configMapKeyRef": {
                                             "name": POST_DEPLOY_ENV_CONFIGMAP_NAME,
                                             "key": LOKI_URL_ENV_NAME,
+                                            "optional": True,
                                         }
                                     },
                                 },

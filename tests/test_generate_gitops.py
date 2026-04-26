@@ -106,7 +106,7 @@ class GenerateGitOpsTests(unittest.TestCase):
                 for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
                 if env["name"] == "OBSERVABILITY_WORKFLOW_REF"
             )
-            self.assertEqual(workflow_ref_env["value"], "feat/post-deployment")
+            self.assertEqual(workflow_ref_env["value"], "dev")
             prometheus_env = next(
                 env
                 for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -120,6 +120,7 @@ class GenerateGitOpsTests(unittest.TestCase):
                 prometheus_env["valueFrom"]["configMapKeyRef"]["key"],
                 "PROMETHEUS_URL",
             )
+            self.assertTrue(prometheus_env["valueFrom"]["configMapKeyRef"]["optional"])
             loki_env = next(
                 env
                 for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -133,6 +134,7 @@ class GenerateGitOpsTests(unittest.TestCase):
                 loki_env["valueFrom"]["configMapKeyRef"]["key"],
                 "LOKI_URL",
             )
+            self.assertTrue(loki_env["valueFrom"]["configMapKeyRef"]["optional"])
             dispatch_script = post_deploy_job["spec"]["template"]["spec"]["containers"][0]["args"][0]
             self.assertIn('Authorization: Bearer ${GITHUB_TOKEN}', dispatch_script)
             self.assertIn('"ref": "${OBSERVABILITY_WORKFLOW_REF}"', dispatch_script)

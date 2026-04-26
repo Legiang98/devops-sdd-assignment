@@ -52,7 +52,7 @@ on:
   push:
     branches:
       - dev
-      - feat/post-deployment
+      - dev
     paths:
       - ".github/workflows/observability-workflow.yml"
       - "devops/observability/**"
@@ -92,7 +92,7 @@ jobs:
     if: |
       always() && 
       (needs.validate_assets.result == 'success' || needs.validate_assets.result == 'skipped') &&
-      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/post-deployment'))
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/dev'))
     runs-on: [self-hosted, macOS]
     timeout-minutes: 15
     steps:
@@ -261,7 +261,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'rollback-workflow.yml',
-              ref: 'feat/post-deployment',
+              ref: 'dev',
               inputs: {
                 service_name: '${{ github.event.inputs.service_name }}',
                 change_id: '${{ steps.resolve_state.outputs.change_id }}',

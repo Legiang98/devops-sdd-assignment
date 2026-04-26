@@ -45,15 +45,17 @@ spec:
             configMapKeyRef:
               name: post-deployment-evaluation-env
               key: PROMETHEUS_URL
+              optional: true
         - name: LOKI_URL
           valueFrom:
             configMapKeyRef:
               name: post-deployment-evaluation-env
               key: LOKI_URL
+              optional: true
         - name: OBSERVABILITY_WORKFLOW_URL
           value: https://api.github.com/repos/Legiang98/devops-sdd-assignment/actions/workflows/observability-workflow.yml/dispatches
         - name: OBSERVABILITY_WORKFLOW_REF
-          value: feat/post-deployment
+          value: dev
         command:
         - /bin/sh
         - -ec
