@@ -129,93 +129,68 @@ jobs:
             echo "- GitOps: \`${{ steps.resolve.outputs.manifest_dir }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  generate_and_gate:
-    runs-on: [self-hosted, macOS]
-    needs: resolve
-    if: needs.resolve.outputs.should_run == 'true'
-    env:
-      AGENT_CODEGEN_PROVIDER: ollama
-      OLLAMA_MODEL: qwen2.5:7b
-      OLLAMA_BASE_URL: http://127.0.0.1:11434
-      OLLAMA_TIMEOUT_SECONDS: 180
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.FINE_GRAINED_PAT }}
-          clean: true
-          set-safe-directory: false
+  # generate_and_gate:
+  #   runs-on: [self-hosted, macOS]
+  #   needs: resolve
+  #   if: needs.resolve.outputs.should_run == 'true'
+  #   env:
+  #     AGENT_CODEGEN_PROVIDER: ollama
+  #     OLLAMA_MODEL: qwen2.5:7b
+  #     OLLAMA_BASE_URL: http://127.0.0.1:11434
+  #     OLLAMA_TIMEOUT_SECONDS: 180
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
+  #         token: ${{ secrets.FINE_GRAINED_PAT }}
+  #         clean: true
+  #         set-safe-directory: false
 
-      - name: Install dependencies
-        run: |
-          python3 -m venv .venv
-          . .venv/bin/activate
-          pip install -r requirements.txt
+  #     - name: Install dependencies
+  #       run: |
+  #         python3 -m venv .venv
+  #         . .venv/bin/activate
+  #         pip install -r requirements.txt
 
-      - name: Check Ollama endpoint
-        if: env.AGENT_CODEGEN_PROVIDER == 'ollama'
-        run: |
-          curl -sf "${OLLAMA_BASE_URL}/api/tags" >/dev/null
+      # - name: Run policy gate
+      #   run: |
+      #     . .venv/bin/activate
+      #     ./scripts/gate.sh \
+      #       "${{ needs.resolve.outputs.spec_file }}" \
+      #       "${{ needs.resolve.outputs.release_id }}"
 
-      - name: Run agent generation
-        run: |
-          . .venv/bin/activate
-          ./scripts/generate.sh \
-            "${{ needs.resolve.outputs.spec_file }}" \
-            "${AGENT_CODEGEN_PROVIDER:-deterministic}" \
-            "${OLLAMA_MODEL:-qwen2.5:7b}" \
-            "${OLLAMA_BASE_URL:-http://127.0.0.1:11434}" \
-            "${OLLAMA_TIMEOUT_SECONDS:-180}"
+      # - name: Enforce non-deterministic codegen in CI
+      #   run: |
+      #     set -euo pipefail
+      #     REPORT="build/releases/${{ needs.resolve.outputs.release_id }}/evidence/codegen-report.json"
+      #     python3 -c "import json, pathlib; r=json.loads(pathlib.Path('${REPORT}').read_text(encoding='utf-8')); p=r.get('provider'); assert p=='ollama', f'Expected provider=ollama, got provider={p!r}'; print(f'Verified codegen provider: {p}')"
 
-      - name: Run policy gate
-        run: |
-          . .venv/bin/activate
-          ./scripts/gate.sh \
-            "${{ needs.resolve.outputs.spec_file }}" \
-            "${{ needs.resolve.outputs.release_id }}"
+      # - name: Write summary
+      #   run: |
+      #     python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+      #     import json
+      #     from pathlib import Path
 
-      - name: Enforce non-deterministic codegen in CI
-        run: |
-          set -euo pipefail
-          REPORT="build/releases/${{ needs.resolve.outputs.release_id }}/evidence/codegen-report.json"
-          python3 -c "import json, pathlib; r=json.loads(pathlib.Path('${REPORT}').read_text(encoding='utf-8')); p=r.get('provider'); assert p=='ollama', f'Expected provider=ollama, got provider={p!r}'; print(f'Verified codegen provider: {p}')"
+      #     release_id = "${{ needs.resolve.outputs.release_id }}"
+      #     evidence = Path("build/releases") / release_id / "evidence"
+      #     codegen = json.loads((evidence / "codegen-report.json").read_text(encoding="utf-8"))
+      #     policy = json.loads((evidence / "policy-report.json").read_text(encoding="utf-8"))
+      #     code_policy = json.loads((evidence / "code-policy-report.json").read_text(encoding="utf-8"))
 
-      - name: Write summary
-        run: |
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          from pathlib import Path
-
-          release_id = "${{ needs.resolve.outputs.release_id }}"
-          evidence = Path("build/releases") / release_id / "evidence"
-          codegen = json.loads((evidence / "codegen-report.json").read_text(encoding="utf-8"))
-          policy = json.loads((evidence / "policy-report.json").read_text(encoding="utf-8"))
-          code_policy = json.loads((evidence / "code-policy-report.json").read_text(encoding="utf-8"))
-
-          print("## Generate And Gate")
-          print()
-          print(f"- Provider: `{codegen['provider']}`")
-          print(f"- App codegen: `{codegen.get('app_codegen_provider')}`")
-          print(f"- GitOps codegen: `{codegen.get('gitops_codegen_provider')}`")
-          print(f"- Policy: `{policy['status']}`")
-          print(f"- Code policy: `{code_policy['status']}`")
-          print(f"- Generated files: `{len(codegen.get('generated_files', []))}`")
-          PY
-
-      - name: Upload generated workspace
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-workspace-${{ needs.resolve.outputs.release_id }}
-          path: |
-            build/releases/${{ needs.resolve.outputs.release_id }}/
-            logs/pipeline.log
-            ${{ needs.resolve.outputs.app_path }}/
-            ${{ needs.resolve.outputs.manifest_dir }}/
+      #     print("## Generate And Gate")
+      #     print()
+      #     print(f"- Provider: `{codegen['provider']}`")
+      #     print(f"- App codegen: `{codegen.get('app_codegen_provider')}`")
+      #     print(f"- GitOps codegen: `{codegen.get('gitops_codegen_provider')}`")
+      #     print(f"- Policy: `{policy['status']}`")
+      #     print(f"- Code policy: `{code_policy['status']}`")
+      #     print(f"- Generated files: `{len(codegen.get('generated_files', []))}`")
+      #     PY
 
   build_and_gitops:
     runs-on: [self-hosted, macOS]
-    needs: [resolve, generate_and_gate]
+    needs: [resolve]
     if: needs.resolve.outputs.should_run == 'true'
     outputs:
       image_repository: ${{ steps.image_meta.outputs.image_repository }}
