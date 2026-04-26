@@ -81,7 +81,9 @@ jobs:
 
   evaluate:
     name: Evaluate Deployment Health
-    if: github.event_name == 'workflow_dispatch'
+    if: |
+      github.event_name == 'workflow_dispatch' || 
+      (github.event_name == 'push' && github.ref == 'refs/heads/feat/post-deployment')
     runs-on: [self-hosted, macOS]
     timeout-minutes: 15
     steps:
@@ -100,17 +102,17 @@ jobs:
           from pathlib import Path
 
           payload = {
-              "service_name": "${{ github.event.inputs.service_name }}",
-              "namespace": "${{ github.event.inputs.namespace }}",
-              "app_label": "${{ github.event.inputs.app_label }}",
-              "change_id": "${{ github.event.inputs.change_id }}",
-              "current_version": "${{ github.event.inputs.current_version }}",
-              "previous_healthy_version": "${{ github.event.inputs.previous_healthy_version }}",
-              "argocd_app_name": "${{ github.event.inputs.argocd_app_name }}",
+              "service_name": "${{ github.event.inputs.service_name }}" or "expense-workflow-service",
+              "namespace": "${{ github.event.inputs.namespace }}" or "devops-ssd-assignment",
+              "app_label": "${{ github.event.inputs.app_label }}" or "expense-workflow-service",
+              "change_id": "${{ github.event.inputs.change_id }}" or f"push-{ '${{ github.sha }}'[:7] }",
+              "current_version": "${{ github.event.inputs.current_version }}" or "${{ github.sha }}",
+              "previous_healthy_version": "${{ github.event.inputs.previous_healthy_version }}" or "unknown",
+              "argocd_app_name": "${{ github.event.inputs.argocd_app_name }}" or "expense-workflow-service",
               "prometheus_url": "${{ github.event.inputs.prometheus_url || env.PROMETHEUS_URL }}",
               "loki_url": "${{ github.event.inputs.loki_url || env.LOKI_URL }}",
-              "health_endpoint": "${{ github.event.inputs.health_endpoint }}",
-              "trigger": "workflow_dispatch",
+              "health_endpoint": "${{ github.event.inputs.health_endpoint }}" or "http://localhost:8080/health",
+              "trigger": "${{ github.event_name }}",
               "workflow_run_id": "${{ github.run_id }}",
           }
           Path("./evidence/deployment_context.json").write_text(
@@ -122,12 +124,12 @@ jobs:
       - name: Collect Evidence
         run: |
           bash devops/observability/evaluation/collect_evidence.sh \
-            "${{ github.event.inputs.service_name }}" \
-            "${{ github.event.inputs.namespace }}" \
-            "${{ github.event.inputs.app_label }}" \
+            "${{ github.event.inputs.service_name || 'expense-workflow-service' }}" \
+            "${{ github.event.inputs.namespace || 'devops-ssd-assignment' }}" \
+            "${{ github.event.inputs.app_label || 'expense-workflow-service' }}" \
             "${{ github.event.inputs.prometheus_url || env.PROMETHEUS_URL }}" \
             "${{ github.event.inputs.loki_url || env.LOKI_URL }}" \
-            "${{ github.event.inputs.health_endpoint }}" \
+            "${{ github.event.inputs.health_endpoint || 'http://localhost:8080/health' }}" \
             "./evidence"
 
       - name: Run AI Monitoring Agent
