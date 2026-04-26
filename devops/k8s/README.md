@@ -5,8 +5,8 @@ Add a new service by creating a new sibling directory with that service's manife
 
 Current layout:
 - `argocd/`: namespace, ingress, repository secret, and `Application` manifests for Argo CD bootstrap
-- `expense-workflow-service/`: namespace, deployment, service, ingress, and image tag manifests for the expense service
-- `invoice-workflow-service/`: namespace, deployment, service, ingress, and image tag manifests for the invoice workflow service
+- `expense-workflow-service/`: namespace, deployment, service, ingress, image tag, and post-deploy hook manifests for the expense service
+- `invoice-workflow-service/`: namespace, deployment, service, ingress, image tag, and post-deploy hook manifests for the invoice workflow service
 
 For Minikube localhost ingress:
 - Enable the ingress addon: `minikube addons enable ingress`
@@ -18,3 +18,8 @@ Current ingress status:
 - `expense-workflow-service`: ingress is generated from spec and currently disabled because the spec sets `deployment.k8s.ingress.enabled: false`
 - `invoice-workflow-service`: ingress is generated as a real `Ingress` because the spec sets `deployment.k8s.ingress.enabled: true`
 - `argocd`: ingress host is `http://argocd.192.168.49.2.nip.io` and assumes Argo CD core is already installed
+
+Post-deploy evaluation:
+- `post-deploy-evaluation-job.yaml` is an Argo CD `PostSync` hook and runs only after that child application syncs.
+- Keep the hook in the child app manifest path (`devops/k8s/<app>`), not in the parent app-of-apps path, so evaluation stays scoped to the deployed service.
+- The hook `Job` itself runs in namespace `argocd` so workflow trigger secrets and RBAC can be centralized there.

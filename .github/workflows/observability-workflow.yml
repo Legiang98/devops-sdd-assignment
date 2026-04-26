@@ -1,0 +1,340 @@
+name: Post-Deployment Observability
+
+env:
+  PROMETHEUS_URL: http://127.0.0.1:56147
+  LOKI_URL: http://127.0.0.1:56003
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Name of the service to monitor"
+        required: true
+        default: "expense-workflow-service"
+      namespace:
+        description: "K8s namespace"
+        required: true
+        default: "devops-ssd-assignment"
+      app_label:
+        description: "App label for log filtering"
+        required: true
+        default: "expense-workflow-service"
+      change_id:
+        description: "The change ID being evaluated"
+        required: true
+      current_version:
+        description: "Current deployed SHA"
+        required: false
+        default: ""
+      previous_healthy_version:
+        description: "Last known healthy SHA"
+        required: false
+        default: ""
+      update_healthy_state:
+        description: "Persist last known healthy state after successful evaluation"
+        required: false
+        default: "false"
+      argocd_app_name:
+        description: "ArgoCD Application Name"
+        required: true
+      prometheus_url:
+        description: "Prometheus API base URL"
+        required: false
+        default: ""
+      loki_url:
+        description: "Loki API URL"
+        required: false
+        default: ""
+      health_endpoint:
+        description: "Service health check URL"
+        required: true
+        default: "http://localhost:8080/health"
+  push:
+    branches:
+      - dev
+      - feat/post-deployment
+    paths:
+      - ".github/workflows/observability-workflow.yml"
+      - "devops/observability/**"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: observability-${{ github.event.inputs.argocd_app_name }}-${{ github.event.inputs.change_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate_assets:
+    name: Validate Observability Assets
+    if: github.event_name == 'push'
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+
+      - name: Validate Python Syntax
+        run: |
+          python3 -m py_compile devops/observability/evaluation/analyze_evidence.py
+          python3 -m py_compile devops/observability/evaluation/resolve_deployment_state.py
+
+      - name: Validate Evidence Collector Script
+        run: |
+          test -f devops/observability/evaluation/collect_evidence.sh
+          bash -n devops/observability/evaluation/collect_evidence.sh
+
+  evaluate:
+    name: Evaluate Deployment Health
+    needs: validate_assets
+    if: |
+      always() && 
+      (needs.validate_assets.result == 'success' || needs.validate_assets.result == 'skipped') &&
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/post-deployment'))
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+
+      - name: Prepare Evidence Directory
+        run: mkdir -p ./evidence
+
+      - name: Resolve Deployment State
+        id: resolve_state
+        run: |
+          set -euo pipefail
+          APP_NAME="${{ github.event.inputs.argocd_app_name || github.event.inputs.service_name || 'expense-workflow-service' }}"
+          SERVICE_NAME="${{ github.event.inputs.service_name || github.event.inputs.argocd_app_name || 'expense-workflow-service' }}"
+          NAMESPACE="${{ github.event.inputs.namespace || 'devops-ssd-assignment' }}"
+          APP_LABEL="${{ github.event.inputs.app_label || github.event.inputs.service_name || 'expense-workflow-service' }}"
+          CHANGE_ID="${{ github.event.inputs.change_id }}"
+          HEALTH_ENDPOINT="${{ github.event.inputs.health_endpoint || 'http://localhost:8080/health' }}"
+          UPDATE_HEALTHY_STATE="${{ github.event.inputs.update_healthy_state || 'false' }}"
+          if [ -z "$CHANGE_ID" ]; then
+            CHANGE_ID="push-${GITHUB_SHA::7}"
+          fi
+
+          python3 devops/observability/evaluation/resolve_deployment_state.py resolve \
+            --app "$APP_NAME" \
+            --output ./evidence/resolved_deployment_state.json
+
+          APP_NAME="$APP_NAME" \
+          SERVICE_NAME="$SERVICE_NAME" \
+          NAMESPACE="$NAMESPACE" \
+          APP_LABEL="$APP_LABEL" \
+          CHANGE_ID="$CHANGE_ID" \
+          HEALTH_ENDPOINT="$HEALTH_ENDPOINT" \
+          UPDATE_HEALTHY_STATE="$UPDATE_HEALTHY_STATE" \
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          resolved = json.loads(Path("./evidence/resolved_deployment_state.json").read_text(encoding="utf-8"))
+          payload = {
+              "service_name": os.environ["SERVICE_NAME"],
+              "namespace": os.environ["NAMESPACE"],
+              "app_label": os.environ["APP_LABEL"],
+              "change_id": os.environ["CHANGE_ID"],
+              "current_version": resolved["current"]["version"],
+              "previous_version": resolved["previous"]["version"] if resolved.get("previous") else "unknown",
+              "previous_healthy_version": (
+                  resolved["last_known_healthy"]["version"]
+                  if resolved.get("last_known_healthy")
+                  else "unknown"
+              ),
+              "previous_healthy_source": resolved["last_known_healthy_source"],
+              "argocd_app_name": os.environ["APP_NAME"],
+              "manifest_dir": resolved["manifest_dir"],
+              "state_path": resolved["state_path"],
+              "image_repository": resolved["current"]["repository"],
+              "current_tag": resolved["current"]["tag"],
+              "previous_tag": resolved["previous"]["tag"] if resolved.get("previous") else "",
+              "previous_healthy_tag": (
+                  resolved["last_known_healthy"]["tag"]
+                  if resolved.get("last_known_healthy")
+                  else ""
+              ),
+              "prometheus_url": "${{ github.event.inputs.prometheus_url || env.PROMETHEUS_URL }}",
+              "loki_url": "${{ github.event.inputs.loki_url || env.LOKI_URL }}",
+              "health_endpoint": os.environ["HEALTH_ENDPOINT"],
+              "update_healthy_state": os.environ["UPDATE_HEALTHY_STATE"],
+              "trigger": "${{ github.event_name }}",
+              "workflow_run_id": "${{ github.run_id }}",
+              "git_sha": "${{ github.sha }}",
+              "git_ref_name": "${{ github.ref_name }}",
+          }
+          Path("./evidence/deployment_context.json").write_text(
+              json.dumps(payload, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+          with github_output.open("a", encoding="utf-8") as handle:
+              handle.write(f"app_name={payload['argocd_app_name']}\n")
+              handle.write(f"service_name={payload['service_name']}\n")
+              handle.write(f"namespace={payload['namespace']}\n")
+              handle.write(f"app_label={payload['app_label']}\n")
+              handle.write(f"change_id={payload['change_id']}\n")
+              handle.write(f"health_endpoint={payload['health_endpoint']}\n")
+              handle.write(f"current_version={payload['current_version']}\n")
+              handle.write(f"previous_healthy_version={payload['previous_healthy_version']}\n")
+          PY
+
+      - name: Collect Evidence
+        run: |
+          bash devops/observability/evaluation/collect_evidence.sh \
+            "${{ steps.resolve_state.outputs.service_name }}" \
+            "${{ steps.resolve_state.outputs.namespace }}" \
+            "${{ steps.resolve_state.outputs.app_label }}" \
+            "${{ github.event.inputs.prometheus_url || env.PROMETHEUS_URL }}" \
+            "${{ github.event.inputs.loki_url || env.LOKI_URL }}" \
+            "${{ steps.resolve_state.outputs.health_endpoint }}" \
+            "./evidence"
+
+      - name: Run AI Monitoring Agent
+        id: monitor
+        run: |
+          python3 devops/observability/evaluation/analyze_evidence.py \
+            --evidence-dir "./evidence" \
+            --service "${{ steps.resolve_state.outputs.service_name }}"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          analysis = json.loads(Path("./evidence/analysis_result.json").read_text(encoding="utf-8"))
+          output_file = os.environ.get("GITHUB_OUTPUT")
+          if output_file:
+              with open(output_file, "a", encoding="utf-8") as handle:
+                  handle.write(f"recommendation={analysis['recommendation']}\n")
+                  handle.write(f"severity={analysis['severity']}\n")
+          PY
+
+      - name: Upload Evidence Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-evidence-${{ steps.resolve_state.outputs.change_id }}
+          path: ./evidence/
+
+      - name: Promote Last Known Healthy State
+        if: steps.monitor.outputs.recommendation == 'stay' && github.event_name == 'workflow_dispatch' && github.event.inputs.update_healthy_state == 'true'
+        run: |
+          python3 devops/observability/evaluation/resolve_deployment_state.py promote \
+            --app "${{ steps.resolve_state.outputs.app_name }}" \
+            --change-id "${{ steps.resolve_state.outputs.change_id }}" \
+            --git-sha "${{ github.sha }}" \
+            --workflow-run-id "${{ github.run_id }}" \
+            --source "observability"
+
+      - name: Commit Healthy State
+        if: steps.monitor.outputs.recommendation == 'stay' && github.event_name == 'workflow_dispatch' && github.event.inputs.update_healthy_state == 'true'
+        env:
+          GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "devops/state/${{ steps.resolve_state.outputs.app_name }}.json"
+          if git diff --cached --quiet; then
+            echo "No healthy state changes to commit"
+            exit 0
+          fi
+          git commit -m "ci(observability): promote healthy state for ${{ steps.resolve_state.outputs.app_name }} [skip ci]"
+          git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Trigger Automated Rollback
+        if: steps.monitor.outputs.recommendation == 'rollback'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.FINE_GRAINED_PAT || github.token }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'rollback-workflow.yml',
+              ref: 'feat/post-deployment',
+              inputs: {
+                service_name: '${{ github.event.inputs.service_name }}',
+                change_id: '${{ steps.resolve_state.outputs.change_id }}',
+                target_version: '${{ github.event.inputs.previous_healthy_version }}'
+              }
+            });
+
+      - name: Create Rollback Recommendation Issue
+        if: steps.monitor.outputs.recommendation == 'rollback'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.FINE_GRAINED_PAT || github.token }}
+          script: |
+            const fs = require('fs');
+            const analysis = JSON.parse(fs.readFileSync('./evidence/analysis_result.json', 'utf8'));
+            const contextPayload = JSON.parse(fs.readFileSync('./evidence/deployment_context.json', 'utf8'));
+            const rollbackContext = {
+              app_name: contextPayload.argocd_app_name,
+              service_name: contextPayload.service_name,
+              manifest_dir: contextPayload.manifest_dir,
+              state_path: contextPayload.state_path,
+              image_repository: contextPayload.image_repository,
+              current_version: contextPayload.current_version,
+              current_tag: contextPayload.current_tag,
+              previous_version: contextPayload.previous_version,
+              previous_healthy_version: contextPayload.previous_healthy_version,
+              previous_healthy_tag: contextPayload.previous_healthy_tag,
+              previous_healthy_source: contextPayload.previous_healthy_source,
+              change_id: contextPayload.change_id,
+              workflow_run_id: contextPayload.workflow_run_id,
+              git_sha: contextPayload.git_sha,
+              git_ref_name: contextPayload.git_ref_name
+            };
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ [Rollback Recommended] ${contextPayload.service_name} - ${contextPayload.change_id}`,
+              labels: ['rollback-needed', 'observability-alert'],
+              body: `
+              ## 🚩 Rollback Recommendation
+              
+              Anomalies detected after deployment **${contextPayload.change_id}**.
+              
+              - **Service:** ${contextPayload.service_name}
+              - **ArgoCD Application:** ${contextPayload.argocd_app_name}
+              - **Current Version:** \`${contextPayload.current_version}\`
+              - **Previous Version:** \`${contextPayload.previous_version}\`
+              - **Previous Healthy Version:** \`${contextPayload.previous_healthy_version}\`
+              - **Severity:** ${analysis.severity.toUpperCase()}
+              
+              ### 📝 Summary
+              > ${analysis.reason}
+              
+              ### Detailed Analysis
+              ${analysis.analysis || '_No additional analysis details._'}
+
+              ### Proposed Rollback
+              - Current image: \`${contextPayload.current_version}\`
+              - Rollback target: \`${contextPayload.previous_healthy_version}\`
+              - Target source: \`${contextPayload.previous_healthy_source}\`
+
+              ### Evidence
+              - Health endpoint: \`${contextPayload.health_endpoint}\`
+              - Prometheus target: \`${contextPayload.prometheus_url}\`
+              - Loki query target: \`${contextPayload.loki_url}\`
+              
+              <!-- rollback-context
+              ${JSON.stringify(rollbackContext, null, 2)}
+              -->
+              
+              ---
+              **Action Required:**
+              Review the uploaded evidence artifacts. Comment \`/approve-rollback\` to trigger the rollback workflow and update GitOps manifests back to the last known healthy image.
+              `
+            });

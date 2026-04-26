@@ -4,14 +4,19 @@ GitOps handoff from Git to cluster via Argo CD Applications.
 
 Canonical Kubernetes-facing manifests now live under `devops/k8s/argocd/`.
 
-## Applications
+## Bootstrap Flow
 
-- `application.yaml`: deploys the expense service manifests from `devops/k8s/expense-workflow` into namespace `devops-ssd-assignment`.
-- `observability-application.yaml`: deploys the observability stack from `devops/observability/minikube` into namespace `monitoring`.
+- `application.yaml`: parent app-of-apps bootstrap. It points Argo CD at `devops/k8s/argocd`.
+- Child `Application` manifests under `devops/k8s/argocd/` then manage each service or platform slice.
 
 ## Apply
 
 ```bash
 kubectl apply -f devops/argocd/application.yaml
-kubectl apply -f devops/argocd/observability-application.yaml
 ```
+
+After that, Argo CD should sync:
+- `namespace.yaml`
+- `repo-secret.yaml`
+- `ingress.yaml`
+- `*-application.yaml` child apps such as `expense-workflow-service-application.yaml`, `invoice-workflow-service-application.yaml`, and `observability-application.yaml`
