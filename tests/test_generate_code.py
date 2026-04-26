@@ -1,6 +1,10 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from devops.agent.generate_code import (
+    deployment_image_from_existing_manifest,
+    deployment_manifest_from_spec,
     dockerfile_body,
     expected_contract,
     generic_app_module_body,
@@ -10,6 +14,57 @@ from devops.agent.generate_code import (
 
 
 class GenerateCodeTests(unittest.TestCase):
+    def test_existing_deployment_image_is_preserved(self):
+        with TemporaryDirectory() as tmpdir:
+            gitops_root = Path(tmpdir)
+            (gitops_root / "deployment.yaml").write_text(
+                """
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: invoice-workflow-service:abc123def456
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            image = deployment_image_from_existing_manifest(gitops_root, "invoice-workflow-service")
+
+            self.assertEqual(image, "invoice-workflow-service:abc123def456")
+
+    def test_new_deployment_defaults_to_latest_image(self):
+        with TemporaryDirectory() as tmpdir:
+            image = deployment_image_from_existing_manifest(
+                Path(tmpdir),
+                "purchase-request-workflow-service",
+            )
+
+            self.assertEqual(image, "purchase-request-workflow-service:latest")
+
+    def test_deployment_manifest_uses_provided_image_without_resetting_tag(self):
+        spec = {
+            "service": "invoice-workflow-service",
+            "deployment": {
+                "k8s": {
+                    "namespace": "devops-ssd-assignment",
+                    "deployment": {
+                        "name": "invoice-workflow-service",
+                        "replicas": 1,
+                        "container_port": 8000,
+                    },
+                }
+            },
+        }
+
+        manifest = deployment_manifest_from_spec(spec, "invoice-workflow-service:abc123def456")
+
+        self.assertIn("image: invoice-workflow-service:abc123def456", manifest)
+        self.assertNotIn("image: invoice-workflow-service:latest", manifest)
+
     def test_generic_app_includes_probe_alias_routes(self):
         spec = {
             "schema_version": "1.0.0",
