@@ -26,7 +26,6 @@ jobs:
       app_path: ${{ steps.detect.outputs.app_path }}
       manifest_dir: ${{ steps.detect.outputs.manifest_dir }}
       argocd_application_path: ${{ steps.detect.outputs.argocd_application_path }}
-      diff_body: ${{ steps.capture_diff.outputs.body }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -100,13 +99,13 @@ jobs:
           IMAGE_TAG="${GITHUB_SHA::12}"
           ./scripts/update_image_tag.sh "${{ steps.detect.outputs.manifest_dir }}" "${{ steps.detect.outputs.app_name }}" "$IMAGE_TAG"
 
-      - name: Capture Manifest Diff
+      - name: Build Approval Issue Body
         if: steps.detect.outputs.changed == 'true'
-        id: capture_diff
         run: |
           set -euo pipefail
           SOURCE_DIFF_FILE=source.diff
           DEPLOY_DIFF_FILE=deploy.diff
+          APPROVAL_BODY_FILE=approval_issue_body.md
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
             git diff "${{ github.event.before }}" "${{ github.sha }}" -- \
               "${{ steps.detect.outputs.app_path }}" \
@@ -120,21 +119,34 @@ jobs:
           git diff --cached -- \
             "${{ steps.detect.outputs.manifest_dir }}" \
             "${{ steps.detect.outputs.argocd_application_path }}" > "$DEPLOY_DIFF_FILE"
-          echo "body<<EOF" >> "$GITHUB_OUTPUT"
-          echo "### 🚀 Planned Changes for ${{ steps.detect.outputs.app_name }}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### 🚀 Planned Changes for ${{ steps.detect.outputs.app_name }}"
+            echo ""
+            echo "- Spec: \`${{ steps.detect.outputs.detected_spec }}\`"
+            echo "- App Path: \`${{ steps.detect.outputs.app_path }}\`"
+            echo "- Manifest Path: \`${{ steps.detect.outputs.manifest_dir }}\`"
+            echo "- Argo CD App: \`${{ steps.detect.outputs.argocd_application_path }}\`"
+          } > "$APPROVAL_BODY_FILE"
+
           if [ -s "$SOURCE_DIFF_FILE" ]; then
-            echo "" >> "$GITHUB_OUTPUT"
-            echo "#### Source Diff" >> "$GITHUB_OUTPUT"
-            echo "\`\`\`diff" >> "$GITHUB_OUTPUT"
-            cat "$SOURCE_DIFF_FILE" >> "$GITHUB_OUTPUT"
-            echo "\`\`\`" >> "$GITHUB_OUTPUT"
+            {
+              echo ""
+              echo "#### Source Diff"
+              echo "\`\`\`diff"
+              sed -n '1,250p' "$SOURCE_DIFF_FILE"
+              echo "\`\`\`"
+            } >> "$APPROVAL_BODY_FILE"
           fi
-          echo "" >> "$GITHUB_OUTPUT"
-          echo "#### GitOps Diff" >> "$GITHUB_OUTPUT"
-          echo "\`\`\`diff" >> "$GITHUB_OUTPUT"
-          cat "$DEPLOY_DIFF_FILE" >> "$GITHUB_OUTPUT"
-          echo "\`\`\`" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo ""
+            echo "#### GitOps Diff"
+            echo "\`\`\`diff"
+            sed -n '1,250p' "$DEPLOY_DIFF_FILE"
+            echo "\`\`\`"
+            echo ""
+            echo "Please approve to deploy these changes."
+          } >> "$APPROVAL_BODY_FILE"
 
       - name: Upload Manifest Artifacts
         if: steps.detect.outputs.changed == 'true'
@@ -145,12 +157,34 @@ jobs:
             ${{ steps.detect.outputs.manifest_dir }}/
             ${{ steps.detect.outputs.argocd_application_path }}
 
+      - name: Upload Approval Issue Body
+        if: steps.detect.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: approval-issue-body-${{ github.run_id }}
+          path: approval_issue_body.md
+
   approve:
     name: Manual Approval
     needs: build
     if: needs.build.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Download Approval Issue Body
+        uses: actions/download-artifact@v4
+        with:
+          name: approval-issue-body-${{ github.run_id }}
+          path: ./approval
+
+      - name: Load Approval Issue Body
+        id: approval_body
+        run: |
+          {
+            echo "body<<EOF"
+            cat ./approval/approval_issue_body.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Await Approval
         uses: trstringer/manual-approval@v1
         with:
@@ -158,10 +192,7 @@ jobs:
           approvers: ${{ github.actor }}
           minimum-approvals: 1
           issue-title: "[GitOps Approval] ${{ needs.build.outputs.app_name }} manifest update"
-          issue-body: |
-            ${{ needs.build.outputs.diff_body }}
-            
-            Please approve to deploy these changes.
+          issue-body: ${{ steps.approval_body.outputs.body }}
 
   apply:
     name: Apply Manifests
