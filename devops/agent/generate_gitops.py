@@ -33,7 +33,7 @@ def main():
     with open(spec_path, "r") as f:
         spec_content = yaml.safe_load(f)
 
-    app_name = spec_content.get("application", {}).get("name", output_dir.name)
+    app_name = spec_content.get("service") or spec_content.get("application", {}).get("name") or output_dir.name
     
     print(f"[*] Analyzing spec for application: {app_name}")
     
