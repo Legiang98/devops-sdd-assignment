@@ -27,48 +27,72 @@ jobs:
           token: ${{ secrets.FINE_GRAINED_PAT }}
           set-safe-directory: false
 
-      - name: Resolve Application Metadata
-        id: resolve
-        run: |
-          python3 scripts/resolve_pipeline_spec.py \
-            --event "${{ github.event_name }}" \
-            --before "${{ github.event.before }}" \
-            --after "${{ github.sha }}" \
-            --manual-spec "${{ github.event.inputs.spec_file }}" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Build image and update GitOps
-        if: steps.resolve.outputs.should_run == 'true'
-        id: image_meta
+      - name: Detect Spec Changes
+        id: detect
         run: |
           set -euo pipefail
-          IMAGE_REPOSITORY="${{ steps.resolve.outputs.app_dir }}"
+          
+          SPEC_FILE="${{ github.event.inputs.spec_file }}"
+          if [ -z "$SPEC_FILE" ]; then
+            # Check for changes in applications specs
+            if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+               CHANGED_SPEC=$(git diff --name-only origin/dev HEAD -- 'applications/**/specs/*.yaml' | head -n 1)
+            else
+               CHANGED_SPEC=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- 'applications/**/specs/*.yaml' | head -n 1)
+            fi
+            SPEC_FILE="$CHANGED_SPEC"
+          fi
+          
+          if [ -z "$SPEC_FILE" ]; then
+            echo "No application spec changes detected. Skipping pipeline."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          # Define Application Metadata
+          APP_NAME=$(basename $(dirname $(dirname "$SPEC_FILE")))
+          APP_WORKSPACE="applications/$APP_NAME"
+          
+          echo "detected_spec=$SPEC_FILE" >> "$GITHUB_OUTPUT"
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "app_workspace=$APP_WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "manifest_dir=devops/k8s/$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          
+          echo "✅ Detected change in $APP_NAME (Spec: $SPEC_FILE)"
+
+      - name: Build via Minikube
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          APP_NAME="${{ steps.detect.outputs.app_name }}"
           IMAGE_TAG="${GITHUB_SHA::12}"
+          
+          echo "[GitOps] Building image $APP_NAME:$IMAGE_TAG via Minikube..."
+          minikube image build -t "$APP_NAME:$IMAGE_TAG" .
 
-          echo "[GitOps] Building image '${IMAGE_REPOSITORY}:${IMAGE_TAG}' via Minikube..."
-          minikube image build \
-            -f "${{ steps.resolve.outputs.app_dockerfile }}" \
-            -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
-            .
-
-          echo "[GitOps] Updating manifest..."
-          ./scripts/update_image_tag.sh "${{ steps.resolve.outputs.manifest_dir }}" "${IMAGE_REPOSITORY}" "${IMAGE_TAG}"
-          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Commit and Push Manifest Changes
-        if: steps.resolve.outputs.should_run == 'true'
+      - name: Update Manifest and Push
+        if: steps.detect.outputs.changed == 'true'
         env:
           GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
         run: |
+          set -euo pipefail
+          APP_NAME="${{ steps.detect.outputs.app_name }}"
+          MANIFEST_DIR="${{ steps.detect.outputs.manifest_dir }}"
+          IMAGE_TAG="${GITHUB_SHA::12}"
+          
+          echo "[GitOps] Updating manifest in $MANIFEST_DIR..."
+          ./scripts/update_image_tag.sh "$MANIFEST_DIR" "$APP_NAME" "$IMAGE_TAG"
+          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${{ steps.resolve.outputs.manifest_dir }}"
+          git add "$MANIFEST_DIR"
           
           if git diff --cached --quiet; then
-            echo "No manifest changes to commit"
+            echo "No changes to commit"
             exit 0
           fi
 
-          git commit -m "ci(gitops): update image tag for ${{ steps.resolve.outputs.release_id }} [skip ci]"
+          git commit -m "ci(gitops): update $APP_NAME image tag [skip ci]"
           git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
           git push origin "HEAD:${{ github.ref_name }}"
