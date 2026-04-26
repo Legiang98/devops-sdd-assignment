@@ -40,6 +40,16 @@ spec:
               key: pat
         - name: HEALTH_ENDPOINT
           value: http://expense-workflow-service.devops-ssd-assignment.svc.cluster.local/health
+        - name: PROMETHEUS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: post-deployment-evaluation-env
+              key: PROMETHEUS_URL
+        - name: LOKI_URL
+          valueFrom:
+            configMapKeyRef:
+              name: post-deployment-evaluation-env
+              key: LOKI_URL
         - name: OBSERVABILITY_WORKFLOW_URL
           value: https://api.github.com/repos/Legiang98/devops-sdd-assignment/actions/workflows/observability-workflow.yml/dispatches
         - name: OBSERVABILITY_WORKFLOW_REF
@@ -61,6 +71,8 @@ spec:
               "current_version": "${CURRENT_VERSION}",
               "previous_healthy_version": "${PREVIOUS_HEALTHY_VERSION}",
               "argocd_app_name": "${ARGOCD_APP_NAME}",
+              "prometheus_url": "${PROMETHEUS_URL}",
+              "loki_url": "${LOKI_URL}",
               "health_endpoint": "${HEALTH_ENDPOINT}"
             }
           }

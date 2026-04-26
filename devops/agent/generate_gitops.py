@@ -17,6 +17,9 @@ ARGOCD_NAMESPACE = "argocd"
 POST_DEPLOY_TRIGGER_SECRET_NAME = "gha-post-deployment-trigger"
 POST_DEPLOY_TRIGGER_SECRET_KEY = "pat"
 OBSERVABILITY_WORKFLOW_REF = "feat/post-deployment"
+POST_DEPLOY_ENV_CONFIGMAP_NAME = "post-deployment-evaluation-env"
+PROMETHEUS_URL_ENV_NAME = "PROMETHEUS_URL"
+LOKI_URL_ENV_NAME = "LOKI_URL"
 
 
 def parse_args():
@@ -372,6 +375,24 @@ def render_post_deploy_evaluation_job(
                                     "value": health_endpoint(workload_name, namespace),
                                 },
                                 {
+                                    "name": PROMETHEUS_URL_ENV_NAME,
+                                    "valueFrom": {
+                                        "configMapKeyRef": {
+                                            "name": POST_DEPLOY_ENV_CONFIGMAP_NAME,
+                                            "key": PROMETHEUS_URL_ENV_NAME,
+                                        }
+                                    },
+                                },
+                                {
+                                    "name": LOKI_URL_ENV_NAME,
+                                    "valueFrom": {
+                                        "configMapKeyRef": {
+                                            "name": POST_DEPLOY_ENV_CONFIGMAP_NAME,
+                                            "key": LOKI_URL_ENV_NAME,
+                                        }
+                                    },
+                                },
+                                {
                                     "name": "OBSERVABILITY_WORKFLOW_URL",
                                     "value": workflow_url,
                                 },
@@ -396,6 +417,8 @@ def render_post_deploy_evaluation_job(
                                         '    "current_version": "${CURRENT_VERSION}",',
                                         '    "previous_healthy_version": "${PREVIOUS_HEALTHY_VERSION}",',
                                         '    "argocd_app_name": "${ARGOCD_APP_NAME}",',
+                                        f'    "prometheus_url": "${{{PROMETHEUS_URL_ENV_NAME}}}",',
+                                        f'    "loki_url": "${{{LOKI_URL_ENV_NAME}}}",',
                                         '    "health_endpoint": "${HEALTH_ENDPOINT}"',
                                         "  }",
                                         "}",

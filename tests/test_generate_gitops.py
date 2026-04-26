@@ -93,9 +93,37 @@ class GenerateGitOpsTests(unittest.TestCase):
                 if env["name"] == "OBSERVABILITY_WORKFLOW_REF"
             )
             self.assertEqual(workflow_ref_env["value"], "feat/post-deployment")
+            prometheus_env = next(
+                env
+                for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
+                if env["name"] == "PROMETHEUS_URL"
+            )
+            self.assertEqual(
+                prometheus_env["valueFrom"]["configMapKeyRef"]["name"],
+                "post-deployment-evaluation-env",
+            )
+            self.assertEqual(
+                prometheus_env["valueFrom"]["configMapKeyRef"]["key"],
+                "PROMETHEUS_URL",
+            )
+            loki_env = next(
+                env
+                for env in post_deploy_job["spec"]["template"]["spec"]["containers"][0]["env"]
+                if env["name"] == "LOKI_URL"
+            )
+            self.assertEqual(
+                loki_env["valueFrom"]["configMapKeyRef"]["name"],
+                "post-deployment-evaluation-env",
+            )
+            self.assertEqual(
+                loki_env["valueFrom"]["configMapKeyRef"]["key"],
+                "LOKI_URL",
+            )
             dispatch_script = post_deploy_job["spec"]["template"]["spec"]["containers"][0]["args"][0]
             self.assertIn('Authorization: Bearer ${GITHUB_TOKEN}', dispatch_script)
             self.assertIn('"ref": "${OBSERVABILITY_WORKFLOW_REF}"', dispatch_script)
+            self.assertIn('"prometheus_url": "${PROMETHEUS_URL}"', dispatch_script)
+            self.assertIn('"loki_url": "${LOKI_URL}"', dispatch_script)
 
     def test_ingress_can_be_disabled(self):
         baseline_spec = {
