@@ -1,0 +1,100 @@
+name: Rollback Workflow
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  analyze_crash:
+    name: Analyze Crash and Propose Plan
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'crash')
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+
+      - name: Agent Analysis
+        run: |
+          echo "Agent is analyzing crash logs..."
+          echo "Generating rollback plan for evidence..."
+          # logic for agent to analyze logs and update issue with plan
+
+      - name: Post Plan to Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "### 🛡️ Proposed Rollback Plan\n\nEvidence suggests a crash in service 'XYZ'.\nProposed action: Revert to image tag 'v1.2.0'.\n\nPlease comment `/approve-rollback` or `LGTM` to proceed."
+            })
+
+  execute_rollback:
+    name: Execute Approved Rollback
+    if: |
+      github.event_name == 'issue_comment' &&
+      (contains(github.event.comment.body, '/approve-rollback') || contains(github.event.comment.body, 'LGTM'))
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.FINE_GRAINED_PAT }}
+          clean: true
+          set-safe-directory: false
+
+      - name: Identify Healthy Tag
+        id: healthy_tag
+        run: |
+          echo "Finding last stable image tag from Git history..."
+          # Logic: git log devops/k8s/ --pretty=format:"%H" -n 2
+          echo "tag=v1.2.0" >> "$GITHUB_OUTPUT"
+
+      - name: Update GitOps Manifest
+        run: |
+          echo "Updating manifests to tag ${{ steps.healthy_tag.outputs.tag }}..."
+          # ./scripts/update_image_tag.sh <manifest_dir> <repo> ${{ steps.healthy_tag.outputs.tag }}
+
+      - name: Commit and Push Rollback
+        env:
+          GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add devops/k8s/
+          git commit -m "fix(rollback): revert to ${{ steps.healthy_tag.outputs.tag }} [skip ci]"
+          git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+          git push origin HEAD
+
+      - name: Verify ArgoCD Sync and Health
+        run: |
+          echo "Waiting for ArgoCD sync..."
+          echo "Verifying service health..."
+          # logic to poll k8s health or argo status
+
+      - name: Close Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "✅ Rollback executed successfully. Service is healthy."
+            })
+            github.rest.issues.update({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed'
+            })

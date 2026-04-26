@@ -1,0 +1,169 @@
+name: GitOps Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      spec_file:
+        description: "Spec file path"
+        required: false
+        default: "applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
+  push:
+    branches:
+      - dev
+      - feat/gitops
+    paths:
+      - "applications/**/specs/*.yaml"
+      - ".github/workflows/gitops-workflow.yml"
+
+jobs:
+  build:
+    name: Build and Plan Manifests
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: [self-hosted, macOS]
+    outputs:
+      should_run: ${{ steps.detect.outputs.changed }}
+      app_name: ${{ steps.detect.outputs.app_name }}
+      manifest_dir: ${{ steps.detect.outputs.manifest_dir }}
+      diff_body: ${{ steps.capture_diff.outputs.body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          set-safe-directory: false
+
+      - name: Detect Spec Changes
+        id: detect
+        run: |
+          set -euo pipefail
+          SPEC_FILE="${{ github.event.inputs.spec_file }}"
+          if [ -z "$SPEC_FILE" ]; then
+            if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+               CHANGED_SPEC=$(git diff --name-only origin/dev HEAD -- 'applications/**/specs/*.yaml' | head -n 1)
+            else
+               CHANGED_SPEC=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- 'applications/**/specs/*.yaml' | head -n 1)
+            fi
+            SPEC_FILE="$CHANGED_SPEC"
+          fi
+          
+          if [ -z "$SPEC_FILE" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          APP_NAME=$(basename $(dirname $(dirname "$SPEC_FILE")))
+          echo "detected_spec=$SPEC_FILE" >> "$GITHUB_OUTPUT"
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "manifest_dir=devops/k8s/$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build App Image via Minikube
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          APP_NAME="${{ steps.detect.outputs.app_name }}"
+          IMAGE_TAG="${GITHUB_SHA::12}"
+          minikube image build -t "$APP_NAME:$IMAGE_TAG" .
+
+      - name: Setup Python and Dependencies
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install requests pyyaml
+
+      - name: Generate Infrastructure Manifests
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          source .venv/bin/activate
+          python3 devops/agent/generate_gitops.py \
+            --spec "${{ steps.detect.outputs.detected_spec }}" \
+            --output-dir "${{ steps.detect.outputs.manifest_dir }}"
+
+      - name: Run OPA Policy Check
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          echo "[OPA] Checking manifests..."
+          if grep -r "privileged: true" "${{ steps.detect.outputs.manifest_dir }}"; then
+            echo "❌ Policy violation: Privileged containers are not allowed!"
+            exit 1
+          fi
+
+      - name: Update Image Tag in Manifests
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          IMAGE_TAG="${GITHUB_SHA::12}"
+          ./scripts/update_image_tag.sh "${{ steps.detect.outputs.manifest_dir }}" "${{ steps.detect.outputs.app_name }}" "$IMAGE_TAG"
+
+      - name: Capture Manifest Diff
+        if: steps.detect.outputs.changed == 'true'
+        id: capture_diff
+        run: |
+          git add -A devops/k8s/
+          git diff --cached devops/k8s/ > manifest.diff
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "### 🚀 Manifest Changes for ${{ steps.detect.outputs.app_name }}" >> "$GITHUB_OUTPUT"
+          echo "\`\`\`diff" >> "$GITHUB_OUTPUT"
+          cat manifest.diff >> "$GITHUB_OUTPUT"
+          echo "\`\`\`" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Manifest Artifacts
+        if: steps.detect.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifests-${{ github.run_id }}
+          path: devops/k8s/
+
+  approve:
+    name: Manual Approval
+    needs: build
+    if: needs.build.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Await Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.FINE_GRAINED_PAT }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          issue-title: "[GitOps Approval] ${{ needs.build.outputs.app_name }} manifest update"
+          issue-body: |
+            ${{ needs.build.outputs.diff_body }}
+            
+            Please approve to deploy these changes.
+
+  apply:
+    name: Apply Manifests
+    needs: [build, approve]
+    if: needs.build.outputs.should_run == 'true' && needs.approve.result == 'success'
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.FINE_GRAINED_PAT }}
+          fetch-depth: 0
+          set-safe-directory: false
+
+      - name: Download Approved Manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests-${{ github.run_id }}
+          path: devops/k8s/
+
+      - name: Push to Git
+        env:
+          GH_PAT: ${{ secrets.FINE_GRAINED_PAT }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "devops/k8s/${{ needs.build.outputs.app_name }}"
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "ci(gitops): update ${{ needs.build.outputs.app_name }} manifests [skip ci]"
+          git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+          git push origin "HEAD:${{ github.ref_name }}"
