@@ -264,8 +264,7 @@ jobs:
               ref: 'dev',
               inputs: {
                 service_name: '${{ github.event.inputs.service_name }}',
-                change_id: '${{ steps.resolve_state.outputs.change_id }}',
-                target_version: '${{ github.event.inputs.previous_healthy_version }}'
+                change_id: '${{ steps.resolve_state.outputs.change_id }}'
               }
             });
 
