@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-pydantic
-prometheus_client
-opentelemetry-api
-opentelemetry-sdk
-opentelemetry-instrumentation-fastapi
-opentelemetry-exporter-otlp
