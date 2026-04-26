@@ -1,6 +1,18 @@
 name: Rollback Workflow
 
 on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Name of the service to rollback"
+        required: true
+      change_id:
+        description: "The change ID to rollback"
+        required: true
+      target_version:
+        description: "The target healthy version (optional, will attempt auto-resolve if unknown)"
+        required: false
+        default: "unknown"
   issues:
     types: [opened]
   issue_comment:
@@ -14,43 +26,91 @@ permissions:
 jobs:
   propose_rollback_plan:
     name: Propose Rollback Plan
-    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'rollback-needed')
-    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'rollback-needed'))
+    runs-on: [self-hosted, macOS]
     steps:
-      - name: Post Plan to Issue
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve and Diff
+        id: plan
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SERVICE_NAME="${{ github.event.inputs.service_name }}"
+            CHANGE_ID="${{ github.event.inputs.change_id }}"
+            
+            # Resolve healthy target
+            echo "Resolving rollback target for $SERVICE_NAME..."
+            RESULT=$(python3 devops/observability/evaluation/resolve_deployment_state.py resolve --app "$SERVICE_NAME")
+            
+            TARGET_TAG=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin)['last_known_healthy']['tag'])")
+            IMAGE_REPO=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin)['last_known_healthy']['repository'])")
+            MANIFEST_DIR="devops/k8s/$SERVICE_NAME"
+            
+            if [ "$TARGET_TAG" = "None" ] || [ -z "$TARGET_TAG" ]; then
+              echo "::error::No healthy target found for $SERVICE_NAME"
+              exit 1
+            fi
+
+            # Generate Diff
+            cp "$MANIFEST_DIR/image-tag.yaml" /tmp/old_tag.yaml
+            ./scripts/update_image_tag.sh "$MANIFEST_DIR" "$IMAGE_REPO" "$TARGET_TAG"
+            git diff "$MANIFEST_DIR/image-tag.yaml" > rollback.diff
+            mv /tmp/old_tag.yaml "$MANIFEST_DIR/image-tag.yaml"
+            
+            echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+            echo "target_tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
+            
+            # Create context for the issue body
+            CONTEXT_JSON=$(echo "$RESULT" | python3 -c "import sys, json; d=json.load(sys.stdin); healthy=d['last_known_healthy']; out={'app_name':'$SERVICE_NAME','service_name':'$SERVICE_NAME','manifest_dir':'$MANIFEST_DIR','image_repository':healthy['repository'],'previous_healthy_tag':healthy['tag'],'previous_healthy_version':healthy['version'],'current_version':d['current']['version'],'git_ref_name':'dev','change_id':'$CHANGE_ID'}; print(json.dumps(out))")
+            echo "rollback_context=$CONTEXT_JSON" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or Update Approval Issue
         uses: actions/github-script@v7
         with:
           script: |
-            const body = context.payload.issue.body || '';
-            const match = body.match(/<!-- rollback-context\s*([\s\S]*?)-->/);
-            if (!match) {
-              core.setFailed('Missing rollback context in issue body.');
-              return;
-            }
-            const rollbackContext = JSON.parse(match[1].trim());
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: [
-                '### 🛡️ Proposed Rollback Plan',
+            const fs = require('fs');
+            if (context.eventName === 'workflow_dispatch') {
+              const diff = fs.readFileSync('rollback.diff', 'utf8');
+              const rollbackContext = ${{ steps.plan.outputs.rollback_context }};
+              
+              const body = [
+                '### 🛡️ Automated Rollback Proposal',
                 '',
                 `- Service: \`${rollbackContext.service_name}\``,
-                `- Current image: \`${rollbackContext.current_version}\``,
-                `- Rollback target: \`${rollbackContext.previous_healthy_version}\``,
-                `- Source of healthy target: \`${rollbackContext.previous_healthy_source}\``,
+                `- Target Healthy Tag: \`${rollbackContext.previous_healthy_tag}\``,
                 '',
-                'Please comment `/approve-rollback` to proceed.'
-              ].join('\n')
-            })
+                '#### Proposed Manifest Diff',
+                '```diff',
+                diff,
+                '```',
+                '',
+                'Please comment `/approve-rollback` to execute this revert.',
+                '',
+                '<!-- rollback-context',
+                JSON.stringify(rollbackContext),
+                '-->'
+              ].join('\n');
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[ROLLBACK] ${rollbackContext.service_name}`,
+                labels: ['rollback-needed'],
+                body: body
+              });
+            }
 
   execute_rollback:
     name: Execute Approved Rollback
     if: |
       github.event_name == 'issue_comment' &&
       contains(github.event.issue.labels.*.name, 'rollback-needed') &&
-      contains(github.event.comment.body, '/approve-rollback') &&
-      (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR')
+      contains(github.event.comment.body, '/approve-rollback')
     runs-on: [self-hosted, macOS]
     steps:
       - name: Checkout
@@ -60,32 +120,43 @@ jobs:
           fetch-depth: 0
           set-safe-directory: false
 
-      - name: Parse Rollback Context
+      - name: Parse or Resolve Rollback Context
         id: rollback_context
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body = context.payload.issue.body || '';
-            const match = body.match(/<!-- rollback-context\s*([\s\S]*?)-->/);
-            if (!match) {
-              core.setFailed('Missing rollback context in issue body.');
-              return;
-            }
-            const rollbackContext = JSON.parse(match[1].trim());
-            if (!rollbackContext.previous_healthy_tag || !rollbackContext.image_repository) {
-              core.setFailed('Rollback context is missing healthy image metadata.');
-              return;
-            }
-            core.setOutput('app_name', rollbackContext.app_name);
-            core.setOutput('service_name', rollbackContext.service_name);
-            core.setOutput('manifest_dir', rollbackContext.manifest_dir);
-            core.setOutput('state_path', rollbackContext.state_path);
-            core.setOutput('image_repository', rollbackContext.image_repository);
-            core.setOutput('current_version', rollbackContext.current_version);
-            core.setOutput('target_version', rollbackContext.previous_healthy_version);
-            core.setOutput('target_tag', rollbackContext.previous_healthy_tag);
-            core.setOutput('change_id', rollbackContext.change_id);
-            core.setOutput('git_ref_name', rollbackContext.git_ref_name);
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SERVICE_NAME="${{ github.event.inputs.service_name }}"
+            CHANGE_ID="${{ github.event.inputs.change_id }}"
+            # Use resolve_deployment_state to find the previous healthy version
+            # Assuming current branch is dev
+            echo "Resolving rollback target for $SERVICE_NAME..."
+            RESULT=$(python3 devops/observability/evaluation/resolve_deployment_state.py resolve \
+              --app "$SERVICE_NAME" \
+              --current-id "$CHANGE_ID" \
+              --branch "dev")
+            
+            echo "app_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+            echo "service_name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+            echo "manifest_dir=devops/k8s/$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+            echo "image_repository=$(echo "$RESULT" | grep 'image_repository:' | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+            echo "target_tag=$(echo "$RESULT" | grep 'previous_healthy_tag:' | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+            echo "git_ref_name=dev" >> "$GITHUB_OUTPUT"
+            echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
+          else
+            # Existing Issue/Comment logic
+            python3 - <<EOF
+            import json, os, re
+            body = """${{ github.event.issue.body }}"""
+            match = re.search(r"<!-- rollback-context\s*([\s\S]*?)-->", body)
+            if not match:
+                print("::error::Missing rollback context in issue body")
+                exit(1)
+            ctx = json.loads(match.group(1).strip())
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                for k, v in ctx.items():
+                    f.write(f"{k}={v}\n")
+          EOF
+          fi
 
       - name: Update GitOps Manifest
         run: |
@@ -126,6 +197,7 @@ jobs:
           # logic to poll k8s health or argo status
 
       - name: Close Issue
+        if: github.event_name == 'issue_comment'
         uses: actions/github-script@v7
         with:
           script: |

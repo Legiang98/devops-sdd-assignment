@@ -662,7 +662,32 @@ def namespace_manifest_from_spec(spec: dict) -> str:
     )
 
 
-def deployment_manifest_from_spec(spec: dict, image_repository: str) -> str:
+def deployment_image_from_existing_manifest(
+    gitops_root: Path, image_repository: str
+) -> str:
+    deployment_path = gitops_root / "deployment.yaml"
+    if not deployment_path.exists():
+        return f"{image_repository}:latest"
+
+    try:
+        deployment_doc = yaml.safe_load(deployment_path.read_text(encoding="utf-8")) or {}
+        containers = (
+            deployment_doc.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+            .get("containers", [])
+        )
+        if containers and isinstance(containers[0], dict):
+            image = str(containers[0].get("image", "")).strip()
+            if image:
+                return image
+    except yaml.YAMLError:
+        pass
+
+    return f"{image_repository}:latest"
+
+
+def deployment_manifest_from_spec(spec: dict, image: str) -> str:
     k8s = spec["deployment"]["k8s"]
     deployment = k8s["deployment"]
     service = spec["service"]
@@ -686,7 +711,7 @@ def deployment_manifest_from_spec(spec: dict, image_repository: str) -> str:
         "    spec:\n"
         "      containers:\n"
         "        - name: app\n"
-        f"          image: {image_repository}:latest\n"
+        f"          image: {image}\n"
         "          imagePullPolicy: IfNotPresent\n"
         "          ports:\n"
         f"            - containerPort: {deployment['container_port']}\n"
@@ -1266,7 +1291,8 @@ def main() -> None:
         src_files = {"main.py": app_source}
         app_codegen_provider = "deterministic-template"
     namespace_source = namespace_manifest_from_spec(spec)
-    deployment_source = deployment_manifest_from_spec(spec, app_dir_name)
+    deployment_image = deployment_image_from_existing_manifest(gitops_root, app_dir_name)
+    deployment_source = deployment_manifest_from_spec(spec, deployment_image)
     service_source = service_manifest_from_spec(spec)
     ingress_source = ingress_manifest_from_spec(spec, app_dir_name)
     argocd_application_source = ""
