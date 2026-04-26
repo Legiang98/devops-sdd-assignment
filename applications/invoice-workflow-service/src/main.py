@@ -11,6 +11,7 @@ from src.generated.spec_contract import (
     SCHEMA_VERSION,
     SERVICE,
 )
+from features.invoice_feature import create_invoice, get_invoice, approve_invoice
 
 app = FastAPI(title="Invoice Workflow Service")
 
