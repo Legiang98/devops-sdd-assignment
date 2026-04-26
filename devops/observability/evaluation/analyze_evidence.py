@@ -43,18 +43,12 @@ def main():
     args = parse_args()
     ev = Path(args.evidence_dir)
 
-    health = read_json(ev / "health_status.json")
     prom = read_json(ev / "prometheus_infra_signals.json")
 
     rollback_needed = False
     analysis_points = []
 
-    # 1. Check Health
-    if health.get("http_status") != 200:
-        rollback_needed = True
-        analysis_points.append(f"[Source: HealthCheck] Endpoint failed with status {health.get('http_status')}")
-
-    # 2. Check Prometheus Metrics (Primary Source)
+    # Rollback decisions are Prometheus-driven only.
     infra_fail, infra_findings = analyze_prometheus(prom)
     analysis_points.extend(infra_findings)
     if infra_fail:
@@ -66,9 +60,9 @@ def main():
         "recommendation": "rollback" if rollback_needed else "stay",
         "severity": "high" if rollback_needed else "low",
         "reason": (
-            "Critical failure detected in health or infra metrics."
+            "Critical infrastructure failure detected via Prometheus metrics."
             if rollback_needed
-            else "Service appears stable."
+            else "Service appears stable based on Prometheus signals."
         ),
         "analysis": "\n".join(analysis_points),
     }
