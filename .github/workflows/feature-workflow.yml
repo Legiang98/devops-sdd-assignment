@@ -32,6 +32,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.FINE_GRAINED_PAT }}
           clean: true
+          set-safe-directory: false
 
       - name: Scan Spec
         id: scan
@@ -51,6 +52,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.FINE_GRAINED_PAT }}
           clean: true
+          set-safe-directory: false
 
       - name: Setup Python
         run: |
@@ -76,6 +78,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.FINE_GRAINED_PAT }}
           clean: true
+          set-safe-directory: false
 
       - name: Setup Python
         run: |
@@ -130,6 +133,7 @@ jobs:
           ref: ${{ github.ref_name }}
           token: ${{ secrets.FINE_GRAINED_PAT }}
           clean: true
+          set-safe-directory: false
 
       - name: Setup Python
         run: |
