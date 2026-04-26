@@ -6,7 +6,7 @@ on:
       spec_file:
         description: "Spec file path"
         required: false
-        default: "applications/expense-workflow-service/specs/EXPENSE-finance-approval.yaml"
+        default: "applications/invoice-workflow-service/specs/INVOICE-finance-approval.yaml"
   push:
     branches:
       - dev
