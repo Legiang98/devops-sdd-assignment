@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Path, Query, status
+from fastapi import FastAPI, HTTPException, Path, Query, status, Response
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel
 from src.generated.spec_contract import (
     API_ENDPOINTS,
