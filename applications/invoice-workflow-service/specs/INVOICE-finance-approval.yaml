@@ -1,12 +1,12 @@
 schema_version: 1.0.0
-change_id: EXP-FINANCE-APPROVAL
-service: expense-workflow
-summary: Add finance approval stage for expenses >= 1000
+change_id: INV-FINANCE-APPROVAL
+service: invoice-workflow-service
+summary: Add finance approval stage for invoices >= 5000
 owner: finance-ops
 risk_tier: medium
 
 intent:
-  business_outcome: Prevent high-value expenses from bypassing finance review.
+  business_outcome: Require finance review for high-value invoices before final approval.
   non_goals:
     - No infrastructure migration
     - No schema change
@@ -15,27 +15,27 @@ workflow_change:
   new_stage:
     name: finance
     required_when:
-      amount_gte: 1000
+      amount_gte: 5000
 
 api_contract:
   endpoints:
     - method: POST
-      path: /expenses/{expense_id}/approve
+      path: /invoices/{invoice_id}/approve
 
 quality:
   unit_tests:
     required: true
     min_new_tests: 2
     focus_areas:
-      - expense_submission
+      - invoice_creation
       - approval_thresholds
 
 observability_assertions:
   - metric: approval_step_required_total
     labels:
       step: finance
-    expected_behavior: increment only for expenses >= 1000
+    expected_behavior: increment only for invoices >= 5000
   - metric: expense_approved_total
     expected_behavior: increment when all required stages complete
 
-# test 6
+# test 7

@@ -1,0 +1,120 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+import yaml
+
+from devops.agent.generate_gitops import (
+    build_manifest_bundle,
+    find_baseline_spec,
+    manifest_status,
+    required_manifest_files,
+    scaffold_manifests,
+)
+
+
+class GenerateGitOpsTests(unittest.TestCase):
+    def test_find_baseline_prefers_exact_baseline_yaml(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_root = Path(tmpdir) / "applications" / "sample-service"
+            specs_dir = app_root / "specs"
+            specs_dir.mkdir(parents=True)
+            (specs_dir / "ZZZ-BASELINE.yaml").write_text("service: sample-service\n", encoding="utf-8")
+            exact = specs_dir / "BASELINE.yaml"
+            exact.write_text("service: sample-service\n", encoding="utf-8")
+
+            self.assertEqual(find_baseline_spec(app_root), exact)
+
+    def test_scaffold_generates_required_files_without_overwriting_existing(self):
+        baseline_spec = {
+            "service": "invoice-workflow-service",
+            "workspace": {"path": "applications/invoice-workflow-service"},
+            "deployment": {
+                "k8s": {
+                    "namespace": "devops-ssd-assignment",
+                    "deployment": {
+                        "name": "invoice-workflow-service",
+                        "replicas": 1,
+                        "container_port": 8000,
+                    },
+                    "service": {
+                        "name": "invoice-workflow-service",
+                        "port": 80,
+                        "target_port": 8000,
+                    },
+                    "ingress": {
+                        "enabled": True,
+                    },
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_root = Path(tmpdir) / "applications" / "invoice-workflow-service"
+            output_dir = Path(tmpdir) / "devops" / "k8s" / "invoice-workflow-service"
+            output_dir.mkdir(parents=True)
+            existing_deployment = output_dir / "deployment.yaml"
+            existing_deployment.write_text("existing deployment", encoding="utf-8")
+
+            complete_before, missing_before = manifest_status(output_dir, baseline_spec)
+            self.assertFalse(complete_before)
+            self.assertIn("service.yaml", missing_before)
+
+            written_files = scaffold_manifests(output_dir, build_manifest_bundle(app_root, baseline_spec))
+
+            self.assertNotIn("deployment.yaml", written_files)
+            self.assertEqual(existing_deployment.read_text(encoding="utf-8"), "existing deployment")
+
+            complete_after, missing_after = manifest_status(output_dir, baseline_spec)
+            self.assertTrue(complete_after)
+            self.assertEqual(missing_after, [])
+
+            ingress = yaml.safe_load((output_dir / "ingress.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(ingress["spec"]["rules"][0]["host"], "invoice-workflow-service.local")
+
+    def test_ingress_can_be_disabled(self):
+        baseline_spec = {
+            "service": "expense-workflow-service",
+            "workspace": {"path": "applications/expense-workflow-service"},
+            "deployment": {
+                "k8s": {
+                    "namespace": "devops-ssd-assignment",
+                    "deployment": {
+                        "name": "expense-workflow-service",
+                        "replicas": 1,
+                        "container_port": 8000,
+                    },
+                    "service": {
+                        "name": "expense-workflow-service",
+                        "port": 80,
+                        "target_port": 8000,
+                    },
+                    "ingress": {
+                        "enabled": False,
+                    },
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app_root = Path(tmpdir) / "applications" / "expense-workflow-service"
+            output_dir = Path(tmpdir) / "devops" / "k8s" / "expense-workflow-service"
+
+            manifest_bundle = build_manifest_bundle(app_root, baseline_spec)
+            self.assertNotIn("ingress.yaml", manifest_bundle)
+            self.assertEqual(
+                required_manifest_files(baseline_spec),
+                ["namespace.yaml", "deployment.yaml", "service.yaml", "image-tag.yaml"],
+            )
+
+            written_files = scaffold_manifests(output_dir, manifest_bundle)
+            self.assertNotIn("ingress.yaml", written_files)
+
+            complete, missing = manifest_status(output_dir, baseline_spec)
+            self.assertTrue(complete)
+            self.assertEqual(missing, [])
+            self.assertFalse((output_dir / "ingress.yaml").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

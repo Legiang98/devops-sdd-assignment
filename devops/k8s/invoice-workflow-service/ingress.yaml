@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: invoice-workflow-service-ingress
+  namespace: devops-ssd-assignment
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  labels:
+    app: invoice-workflow-service
+spec:
+  rules:
+  - host: invoice-workflow-service.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: invoice-workflow-service
+            port:
+              number: 80

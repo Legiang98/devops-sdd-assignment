@@ -1,12 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: expense-workflow
-  namespace: devops-ssd-assignment
+  name: expense-workflow-deployment
   labels:
     app: expense-workflow
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: expense-workflow
@@ -16,18 +15,19 @@ spec:
         app: expense-workflow
     spec:
       containers:
-        - name: app
-          image: expense-workflow-service:544985cc283b
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8000
-              name: http
-          env:
-            - name: RULES_PATH
-              value: /runtime/rules.json
-            - name: RELEASE_ID_FILE
-              value: /runtime/release_id.txt
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://alloy.monitoring.svc.cluster.local:4318
-            - name: OTEL_SERVICE_NAME
-              value: expense-workflow
+      - name: expense-workflow-container
+        image: expense-workflow-service:05f1de7ce8ed
+        ports:
+        - containerPort: 8080
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readiness
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: invoice-workflow-service
+  namespace: devops-ssd-assignment
+  labels:
+    app: invoice-workflow-service
+    app.kubernetes.io/name: invoice-workflow-service
+    app.kubernetes.io/managed-by: gitops-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: invoice-workflow-service
+  template:
+    metadata:
+      labels:
+        app: invoice-workflow-service
+        app.kubernetes.io/name: invoice-workflow-service
+        app.kubernetes.io/managed-by: gitops-agent
+    spec:
+      containers:
+      - name: invoice-workflow-service
+        image: invoice-workflow-service:5ba663f41a56
+        ports:
+        - containerPort: 8000
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readiness
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
