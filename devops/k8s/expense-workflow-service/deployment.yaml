@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: expense-workflow-container
-        image: expense-workflow-service:38992b683231
+        image: expense-workflow-service:05f1de7ce8ed
         ports:
         - containerPort: 8080
         livenessProbe:
