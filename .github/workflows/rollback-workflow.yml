@@ -1,6 +1,8 @@
 name: Rollback Workflow
 
 on:
+  issues:
+    types: [opened, labeled]
   issue_comment:
     types: [created]
 
@@ -14,9 +16,84 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan_rollback:
+    name: Plan Rollback Diff
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'rollback-needed')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/plan-rollback'))
+    runs-on: [self-hosted, macOS]
+    outputs:
+      rollback_context: ${{ steps.parse.outputs.rollback_context }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse Context
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const core = require('@actions/core');
+            const body = context.payload.issue.body || '';
+            const match = body.match(/<!-- rollback-context\s*([\s\S]*?)\s*-->/);
+            if (!match) throw new Error('Missing rollback context');
+            const ctx = JSON.parse(match[1]);
+            core.setOutput('rollback_context', JSON.stringify(ctx));
+
+      - name: Generate Diff
+        id: diff
+        env:
+          ROLLBACK_CONTEXT: ${{ steps.parse.outputs.rollback_context }}
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import json, os, subprocess
+          ctx = json.loads(os.environ["ROLLBACK_CONTEXT"])
+          
+          # Apply changes locally to see diff
+          subprocess.run(["./scripts/update_image_tag.sh", ctx["manifest_dir"], ctx["image_repository"], ctx["previous_healthy_tag"]], check=True)
+          
+          # Get diff
+          diff = subprocess.check_output(["git", "diff", ctx["manifest_dir"]], text=True)
+          with open("rollback.diff", "w") as f:
+              f.write(diff)
+          EOF
+
+      - name: Post Diff Comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.FINE_GRAINED_PAT || github.token }}
+          script: |
+            const fs = require('fs');
+            const diff = fs.readFileSync('rollback.diff', 'utf8');
+            const ctx = JSON.parse('${{ steps.parse.outputs.rollback_context }}');
+            
+            const body = [
+              '### 🔍 Rollback Plan (Preview)',
+              'I have calculated the changes required to revert to the last known healthy state.',
+              '',
+              '```diff',
+              diff || 'No changes detected (already at target version).',
+              '```',
+              '',
+              `**Target Tag:** \`${ctx.previous_healthy_tag}\``,
+              '',
+              'Reply with `/approve-rollback` or `/lgtm` to execute this revert.'
+            ].join('\n');
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: body
+            });
+
   resolve_context:
     name: Resolve Rollback Context
     if: |
+      github.event_name == 'issue_comment' &&
       github.event.issue.pull_request == null &&
       (contains(github.event.comment.body, '/approve-rollback') || contains(github.event.comment.body, '/lgtm'))
     runs-on: ubuntu-latest
