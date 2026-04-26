@@ -35,7 +35,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const core = require('@actions/core');
             const body = context.payload.issue.body || '';
             const match = body.match(/<!-- rollback-context\s*([\s\S]*?)\s*-->/);
             if (!match) throw new Error('Missing rollback context');
@@ -108,7 +107,6 @@ jobs:
         with:
           github-token: ${{ secrets.FINE_GRAINED_PAT || github.token }}
           script: |
-            const core = require('@actions/core');
             const comment = context.payload.comment;
             const issue = context.payload.issue;
             const labels = (issue.labels || []).map((label) => typeof label === 'string' ? label : label.name);
