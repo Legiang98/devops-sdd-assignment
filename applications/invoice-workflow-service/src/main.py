@@ -1,5 +1,3 @@
-"""Auto-generated service module from spec. Do not edit manually."""
-
 from fastapi import FastAPI, HTTPException, Path, Query, status
 from pydantic import BaseModel
 from src.generated.spec_contract import (
@@ -16,7 +14,6 @@ from src.generated.spec_contract import (
 app = FastAPI(title="Invoice Workflow Service")
 
 request_total = Counter("generated_request_total", "Generated placeholder requests", ["method", "path"])
-
 
 @app.get("/health")
 @app.get("/healthz")
