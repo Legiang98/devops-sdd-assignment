@@ -3,6 +3,7 @@ import argparse
 import json
 import re
 import subprocess
+import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,21 +41,30 @@ def state_path(app_name: str) -> Path:
 
 
 def parse_image_tag_text(text: str) -> dict:
-    repository = None
-    tag = None
-    for line in text.splitlines():
-        repo_match = re.match(r"^\s*repository:\s*(\S+)\s*$", line)
-        if repo_match:
-            repository = repo_match.group(1)
-        tag_match = re.match(r"^\s*tag:\s*(\S+)\s*$", line)
-        if tag_match:
-            tag = tag_match.group(1)
-    if not repository or not tag:
-        raise ValueError("Could not parse repository/tag from image-tag.yaml")
+    data = yaml.safe_load(text) or {}
+    
+    # Try new format: image: { repository: ..., tag: ... }
+    image_obj = data.get("image", {})
+    if isinstance(image_obj, dict):
+        repository = image_obj.get("repository")
+        tag = image_obj.get("tag")
+    else:
+        repository = None
+        tag = None
+        
+    # Try legacy format: image_tag: ...
+    if not tag:
+        tag = data.get("image_tag")
+        # For legacy, we might need a default repository if missing
+        repository = repository or "invoice-workflow-service" 
+
+    if not tag:
+        raise ValueError(f"Could not parse image tag from content: {text[:50]}...")
+        
     return {
         "repository": repository,
         "tag": tag,
-        "version": f"{repository}:{tag}",
+        "version": f"{repository}:{tag}" if repository else tag,
     }
 
 
