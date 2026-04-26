@@ -131,6 +131,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          echo "========================TESTING===================="
+          echo "app_path: ${{ needs.scan_spec.outputs.app_path }}"
+          echo "manifest_path: ${{ needs.scan_spec.outputs.manifest_path }}"
+          echo "argocd_application_path: ${{ needs.scan_spec.outputs.argocd_application_path }}"
+          echo "========================TESTING===================="
+
+          git status
+
           git add "${{ needs.scan_spec.outputs.app_path }}"
           git add "${{ needs.scan_spec.outputs.manifest_path }}"
           git add "${{ needs.scan_spec.outputs.argocd_application_path }}"
