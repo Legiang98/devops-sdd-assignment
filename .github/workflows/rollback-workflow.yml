@@ -2,7 +2,7 @@ name: Rollback Workflow
 
 on:
   issues:
-    types: [labeled]
+    types: [opened, labeled]
   issue_comment:
     types: [created]
 
