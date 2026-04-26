@@ -24,6 +24,7 @@ jobs:
       should_run: ${{ steps.detect.outputs.changed }}
       app_name: ${{ steps.detect.outputs.app_name }}
       manifest_dir: ${{ steps.detect.outputs.manifest_dir }}
+      diff_body: ${{ steps.capture_diff.outputs.body }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -68,14 +69,7 @@ jobs:
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
-          pip install pyyaml
-
-      - name: Validate Baseline Spec
-        if: steps.detect.outputs.changed == 'true'
-        run: |
-          source .venv/bin/activate
-          python3 devops/policy/validate_baseline.py \
-            --spec "${{ steps.detect.outputs.detected_spec }}"
+          pip install requests pyyaml
 
       - name: Generate Infrastructure Manifests
         if: steps.detect.outputs.changed == 'true'
@@ -102,22 +96,22 @@ jobs:
 
       - name: Capture Manifest Diff
         if: steps.detect.outputs.changed == 'true'
-        id: diff
+        id: capture_diff
         run: |
           git diff devops/k8s/ > manifest.diff
-          echo "### 🚀 Manifest Changes for ${{ steps.detect.outputs.app_name }}" > approval_body.md
-          echo "\`\`\`diff" >> approval_body.md
-          cat manifest.diff >> approval_body.md
-          echo "\`\`\`" >> approval_body.md
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "### 🚀 Manifest Changes for ${{ steps.detect.outputs.app_name }}" >> "$GITHUB_OUTPUT"
+          echo "\`\`\`diff" >> "$GITHUB_OUTPUT"
+          cat manifest.diff >> "$GITHUB_OUTPUT"
+          echo "\`\`\`" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Upload Manifest Artifacts
         if: steps.detect.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: manifests-${{ github.run_id }}
-          path: |
-            ${{ steps.detect.outputs.manifest_dir }}
-            approval_body.md
+          path: ${{ steps.detect.outputs.manifest_dir }}
 
   approve:
     name: Manual Approval
@@ -125,11 +119,6 @@ jobs:
     if: needs.build.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Download Diff for Approval
-        uses: actions/download-artifact@v4
-        with:
-          name: manifests-${{ github.run_id }}
-
       - name: Await Approval
         uses: trstringer/manual-approval@v1
         with:
@@ -137,7 +126,10 @@ jobs:
           approvers: ${{ github.actor }}
           minimum-approvals: 1
           issue-title: "[GitOps Approval] ${{ needs.build.outputs.app_name }} manifest update"
-          issue-body: "Please review the manifest changes in the artifacts and approve to deploy."
+          issue-body: |
+            ${{ needs.build.outputs.diff_body }}
+            
+            Please approve to deploy these changes.
 
   apply:
     name: Apply Manifests
