@@ -1,0 +1,26 @@
+{
+  "app_name": "purchase-request-workflow-service",
+  "manifest_dir": "devops/k8s/purchase-request-workflow-service",
+  "image_tag_path": "devops/k8s/purchase-request-workflow-service/image-tag.yaml",
+  "last_updated_at": "2026-04-27T03:55:47.177121+00:00",
+  "current_candidate": {
+    "repository": "purchase-request-workflow-service",
+    "tag": "06eab8f9cf4c",
+    "version": "purchase-request-workflow-service:06eab8f9cf4c",
+    "change_id": "06eab8f9cf4c",
+    "git_sha": "aa594f30b3d56e478c645e9ce1f4dc1e2d7a3286",
+    "workflow_run_id": "24975738720",
+    "source": "observability",
+    "updated_at": "2026-04-27T03:55:47.177121+00:00"
+  },
+  "last_known_healthy": {
+    "repository": "purchase-request-workflow-service",
+    "tag": "06eab8f9cf4c",
+    "version": "purchase-request-workflow-service:06eab8f9cf4c",
+    "change_id": "06eab8f9cf4c",
+    "git_sha": "aa594f30b3d56e478c645e9ce1f4dc1e2d7a3286",
+    "workflow_run_id": "24975738720",
+    "source": "observability",
+    "updated_at": "2026-04-27T03:55:47.177121+00:00"
+  }
+}
