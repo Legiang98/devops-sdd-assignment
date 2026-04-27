@@ -1,0 +1,26 @@
+{
+  "app_name": "expense-workflow-service",
+  "manifest_dir": "devops/k8s/expense-workflow-service",
+  "image_tag_path": "devops/k8s/expense-workflow-service/image-tag.yaml",
+  "last_updated_at": "2026-04-27T04:17:51.512857+00:00",
+  "current_candidate": {
+    "repository": "expense-workflow-service",
+    "tag": "fe4de0e2c159",
+    "version": "expense-workflow-service:fe4de0e2c159",
+    "change_id": "fe4de0e2c159",
+    "git_sha": "9274a3b0dda762da571870898611ee8af0599959",
+    "workflow_run_id": "24976296000",
+    "source": "observability",
+    "updated_at": "2026-04-27T04:17:51.512857+00:00"
+  },
+  "last_known_healthy": {
+    "repository": "expense-workflow-service",
+    "tag": "fe4de0e2c159",
+    "version": "expense-workflow-service:fe4de0e2c159",
+    "change_id": "fe4de0e2c159",
+    "git_sha": "9274a3b0dda762da571870898611ee8af0599959",
+    "workflow_run_id": "24976296000",
+    "source": "observability",
+    "updated_at": "2026-04-27T04:17:51.512857+00:00"
+  }
+}
