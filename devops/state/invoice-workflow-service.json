@@ -2,25 +2,25 @@
   "app_name": "invoice-workflow-service",
   "manifest_dir": "devops/k8s/invoice-workflow-service",
   "image_tag_path": "devops/k8s/invoice-workflow-service/image-tag.yaml",
-  "last_updated_at": "2026-04-26T18:42:55.416279+00:00",
+  "last_updated_at": "2026-04-27T03:43:10.533654+00:00",
   "current_candidate": {
     "repository": "invoice-workflow-service",
-    "tag": "d6b5ea2d38ae",
-    "version": "invoice-workflow-service:d6b5ea2d38ae",
-    "change_id": "d6b5ea2d38ae",
-    "git_sha": "a8fc585c44dafc6efd530815c9198a01465db343",
-    "workflow_run_id": "24964168911",
+    "tag": "v1",
+    "version": "invoice-workflow-service:v1",
+    "change_id": "eab9c3fdd9d8",
+    "git_sha": "25e4aefb792d9f61498269742b239ac4e186e486",
+    "workflow_run_id": "24975463606",
     "source": "observability",
-    "updated_at": "2026-04-26T18:42:55.416279+00:00"
+    "updated_at": "2026-04-27T03:43:10.533654+00:00"
   },
   "last_known_healthy": {
     "repository": "invoice-workflow-service",
-    "tag": "d6b5ea2d38ae",
-    "version": "invoice-workflow-service:d6b5ea2d38ae",
-    "change_id": "d6b5ea2d38ae",
-    "git_sha": "a8fc585c44dafc6efd530815c9198a01465db343",
-    "workflow_run_id": "24964168911",
+    "tag": "v1",
+    "version": "invoice-workflow-service:v1",
+    "change_id": "eab9c3fdd9d8",
+    "git_sha": "25e4aefb792d9f61498269742b239ac4e186e486",
+    "workflow_run_id": "24975463606",
     "source": "observability",
-    "updated_at": "2026-04-26T18:42:55.416279+00:00"
+    "updated_at": "2026-04-27T03:43:10.533654+00:00"
   }
 }
