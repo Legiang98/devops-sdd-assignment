@@ -4,6 +4,23 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
+# Local env and machine-specific config
+.env
+.env.*
+*.local
+.python-version
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.secret
+*.secrets.*
+.npmrc
+.netrc
+
 devops/argocd/repo-secret.yaml
 devops/k8s/argocd/repo-secret.yaml
 build/
