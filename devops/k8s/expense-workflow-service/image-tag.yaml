@@ -1,0 +1,4 @@
+# Auto-updated by CI pipeline.
+image:
+  repository: expense-workflow-service
+  tag: fe4de0e2c159
