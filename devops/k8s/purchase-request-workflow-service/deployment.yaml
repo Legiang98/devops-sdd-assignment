@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: purchase-request-workflow-service:latest
+          image: purchase-request-workflow-service:06eab8f9cf4c
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
