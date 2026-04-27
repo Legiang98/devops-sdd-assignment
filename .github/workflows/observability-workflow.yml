@@ -1,8 +1,8 @@
 name: Post-Deployment Observability
 
 env:
-  PROMETHEUS_URL: http://127.0.0.1:56147
-  LOKI_URL: http://127.0.0.1:56003
+  PROMETHEUS_URL: http://127.0.0.1:56670
+  LOKI_URL: http://127.0.0.1:56660
   OLLAMA_MODEL: qwen2.5:7b
   OLLAMA_BASE_URL: http://127.0.0.1:11434
 
