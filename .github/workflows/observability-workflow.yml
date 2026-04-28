@@ -54,7 +54,6 @@ on:
   push:
     branches:
       - dev
-      - dev
     paths:
       - ".github/workflows/observability-workflow.yml"
       - "devops/observability/**"
@@ -64,7 +63,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: observability-${{ github.event.inputs.argocd_app_name }}-${{ github.event.inputs.change_id }}
+  group: observability-workflow-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -263,6 +262,7 @@ jobs:
           fi
           git commit -m "ci(observability): promote healthy state for ${{ steps.resolve_state.outputs.app_name }} [skip ci]"
           git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+          git pull --rebase origin "${{ github.ref_name }}"
           git push origin "HEAD:${{ github.ref_name }}"
 
       - name: Create Rollback Recommendation Issue

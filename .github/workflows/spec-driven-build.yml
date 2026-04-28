@@ -17,6 +17,10 @@ on:
       - "scripts/**"
       - ".github/workflows/spec-driven-build.yml"
 
+concurrency:
+  group: spec-driven-build-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   resolve:
     runs-on: [self-hosted, macOS]
@@ -322,6 +326,7 @@ jobs:
           done
           git commit -m "ci(spec): generate code for ${{ needs.resolve.outputs.release_id }}"
           git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+          git pull --rebase origin "${{ github.ref_name }}"
           git push origin HEAD:dev
 
       - name: Write summary

@@ -7,13 +7,10 @@ on:
         description: "Spec file path"
         required: false
         default: "applications/invoice-workflow-service/specs/INVOICE-finance-approval.yaml"
-  push:
-    branches:
-      - dev
-      - feat/gitops
-    paths:
-      - "applications/**/specs/*.yaml"
-      - ".github/workflows/gitops-workflow.yml"
+
+concurrency:
+  group: gitops-workflow-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -221,4 +218,5 @@ jobs:
 
           git commit -m "ci(gitops): update ${{ needs.build.outputs.app_name }} manifests [skip ci]"
           git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git"
+          git pull --rebase origin "${{ github.ref_name }}"
           git push origin "HEAD:${{ github.ref_name }}"
