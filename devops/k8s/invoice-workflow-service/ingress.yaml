@@ -5,10 +5,12 @@ metadata:
   namespace: devops-ssd-assignment
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
 spec:
   ingressClassName: nginx
   rules:
-    - host: invoice-workflow-service.192.168.49.2.nip.io
+    - host: invoice.minikube.local
       http:
         paths:
           - path: /
